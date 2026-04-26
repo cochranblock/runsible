@@ -1,0 +1,12 @@
+[package]
+name = "yaml2toml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "yaml2toml: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "yaml2toml"
+path = "src/main.rs"

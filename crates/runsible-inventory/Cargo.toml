@@ -1,0 +1,12 @@
+[package]
+name = "runsible-inventory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "runsible-inventory: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "runsible-inventory"
+path = "src/main.rs"

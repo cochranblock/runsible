@@ -1,0 +1,12 @@
+[package]
+name = "runsible-connection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "runsible-connection: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "runsible-connection"
+path = "src/main.rs"

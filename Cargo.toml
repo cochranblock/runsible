@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/runsible",
+    "crates/runsible-playbook",
+    "crates/runsible-galaxy",
+    "crates/runsible-vault",
+    "crates/runsible-inventory",
+    "crates/runsible-doc",
+    "crates/runsible-config",
+    "crates/runsible-console",
+    "crates/runsible-pull",
+    "crates/runsible-lint",
+    "crates/runsible-test",
+    "crates/runsible-connection",
+    "crates/yaml2toml",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "Unlicense"
+repository = "https://github.com/mcochran/runsible"
+authors = ["Cochran Block"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+serde_yaml = "0.9"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }

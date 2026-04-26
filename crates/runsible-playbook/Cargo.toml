@@ -1,0 +1,12 @@
+[package]
+name = "runsible-playbook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "runsible-playbook: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "runsible-playbook"
+path = "src/main.rs"

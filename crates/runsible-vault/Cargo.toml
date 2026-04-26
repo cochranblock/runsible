@@ -1,0 +1,12 @@
+[package]
+name = "runsible-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "runsible-vault: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "runsible-vault"
+path = "src/main.rs"

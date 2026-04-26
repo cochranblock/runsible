@@ -1,0 +1,12 @@
+[package]
+name = "runsible-pull"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "runsible-pull: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+
+[[bin]]
+name = "runsible-pull"
+path = "src/main.rs"
