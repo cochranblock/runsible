@@ -92,6 +92,7 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
+| e72641f | 2026-04-26 | Phase 3 M0: runsible, runsible-lint, runsible-doc, runsible-galaxy |
 | f679710 | 2026-04-26 | Phase 0-2 M0: core, config, inventory, vault, connection, yaml2toml, playbook |
 | f6e1fa5 | 2026-04-26 | init runsible: TOML-native Ansible reimagining |
 
