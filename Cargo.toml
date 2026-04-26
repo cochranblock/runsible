@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/runsible-core",
     "crates/runsible",
     "crates/runsible-playbook",
     "crates/runsible-galaxy",
@@ -25,8 +26,21 @@ authors = ["Cochran Block"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
+toml_edit = "0.22"
 serde_yaml = "0.9"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+thiserror = "1"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+indexmap = { version = "2", features = ["serde"] }
+globset = "0.4"
+regex = "1"
+age = { version = "0.10", features = ["armor"] }
+base64 = "0.22"
+runsible-core = { path = "crates/runsible-core", version = "0.0.1" }
+runsible-inventory = { path = "crates/runsible-inventory", version = "0.0.1" }
+runsible-connection = { path = "crates/runsible-connection", version = "0.0.1" }
+runsible-vault = { path = "crates/runsible-vault", version = "0.0.1" }

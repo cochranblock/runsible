@@ -5,8 +5,23 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "runsible-playbook: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
+description = "runsible-playbook: TOML-native playbook engine for runsible"
+
+[lib]
+name = "runsible_playbook"
+path = "src/lib.rs"
 
 [[bin]]
 name = "runsible-playbook"
 path = "src/main.rs"
+
+[dependencies]
+runsible-core = { workspace = true }
+runsible-inventory = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }

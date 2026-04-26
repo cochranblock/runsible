@@ -7,6 +7,18 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-connection: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "runsible_connection"
+path = "src/lib.rs"
+
 [[bin]]
 name = "runsible-connection"
 path = "src/main.rs"
+
+[dependencies]
+runsible-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+async-trait = "0.1"

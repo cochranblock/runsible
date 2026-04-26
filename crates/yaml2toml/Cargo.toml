@@ -7,6 +7,19 @@ repository.workspace = true
 authors.workspace = true
 description = "yaml2toml: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "yaml2toml"
+path = "src/lib.rs"
+
 [[bin]]
 name = "yaml2toml"
 path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

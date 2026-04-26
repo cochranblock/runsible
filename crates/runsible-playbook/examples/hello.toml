@@ -1,0 +1,16 @@
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+
+[[plays]]
+name = "Hello World"
+hosts = "localhost"
+
+[[plays.tasks]]
+name = "Say hello"
+debug = { msg = "Hello, world! From runsible-playbook M0." }
+
+[[plays.tasks]]
+name = "Show the host"
+debug = { msg = "Running on: localhost" }
