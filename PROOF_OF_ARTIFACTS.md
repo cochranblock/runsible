@@ -92,9 +92,7 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
-| pending | 2026-04-26 | Phase 2 M0: runsible-playbook engine + Phase 3 prep |
-| pending | 2026-04-26 | Phase 1: runsible-inventory, runsible-vault, runsible-connection, yaml2toml M0 |
-| pending | 2026-04-26 | Phase 0: runsible-core + runsible-config M0 |
+| f679710 | 2026-04-26 | Phase 0-2 M0: core, config, inventory, vault, connection, yaml2toml, playbook |
 | f6e1fa5 | 2026-04-26 | init runsible: TOML-native Ansible reimagining |
 
 ## How to Verify

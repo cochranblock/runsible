@@ -14,7 +14,7 @@
 
 **What:** Implemented `runsible-playbook` M0 — TOML playbook parser, object-safe `DynModule` catalog, `debug` builtin module, plan→apply execution loop, NDJSON event stream (auto-detect TTY/non-TTY), and exit codes. Smoke test: `runsible-playbook examples/hello.toml -i localhost,` emits structured NDJSON and exits 0. 6/6 tests green. Workspace at 37/37.
 **Why:** runsible-playbook is the central engine; every other crate either feeds it or is driven by it. M0 proves the end-to-end execution path: parse → type-check → plan → apply → event stream, which is the foundation every subsequent module and feature builds on.
-**Commit:** pending
+**Commit:** f679710
 **AI Role:** AI implemented all source files (ast.rs, parse.rs, catalog.rs, modules/debug.rs, engine.rs, output.rs, lib.rs, main.rs, examples/hello.toml) per the M0 spec in docs/plans/runsible-playbook.md. Human directed scope, reviewed design, validated smoke test output.
 **Proof:** `~/.cargo/bin/cargo test --workspace` — 37 tests pass; `./target/debug/runsible-playbook crates/runsible-playbook/examples/hello.toml -i localhost,` exits 0
 
@@ -22,7 +22,7 @@
 
 **What:** Implemented M0 milestones for `runsible-inventory`, `runsible-vault`, `runsible-connection`, and `yaml2toml` in parallel. runsible-inventory: TOML parser, range expansion, full pattern engine (union/intersection/exclusion/glob/regex), `--list`/`--host` CLI. runsible-vault: age X25519 envelope format (`$RUNSIBLE_VAULT;1;CHACHA20-POLY1305;AGE;N`), keygen, encrypt/decrypt files, encrypt-string TOML snippet, recipients list, keystore. runsible-connection: `LocalConnection` + `SshSystemConnection` (system ssh/scp), sudo become, `ConnectionSpec` builder. yaml2toml: YAML→TOML for playbook/inventory/vars profiles, null coercion, key quoting, auto-detect. 31/31 tests green across workspace.
 **Why:** These four crates are the adapter layer between the outside world and the runsible engine. No engine work can proceed without inventory resolution, secret management, remote execution, and YAML import. All four are independent at M0, enabling parallel development.
-**Commit:** pending
+**Commit:** f679710
 **AI Role:** AI implemented all four crates in parallel agent runs, resolved compile errors, and verified test results. Human directed architecture, reviewed approach, validated outputs.
 **Proof:** `~/.cargo/bin/cargo test --workspace` — 31 tests pass before playbook crate added
 
@@ -30,7 +30,7 @@
 
 **What:** Scaffolded `runsible-core` (shared types/traits/errors/events) and implemented `runsible-config` M0. runsible-core: `Module` trait, `Connection` trait, `Cmd`/`ExecOutcome`/`BecomeSpec`, `Event` enum with NDJSON, `Plan`/`Outcome`/`OutcomeStatus`, all errors via thiserror. runsible-config: 8-section Config struct with deny_unknown_fields, 4-path search precedence, permission check, `show`/`list`/`dump`/`init`/`validate`/`explain` CLI. 4/4 tests green.
 **Why:** runsible-core is the shared contract across the entire workspace — Module trait, Connection trait, event schema, type definitions. Without it nothing else can compile. runsible-config must be first to land so every crate can read configuration.
-**Commit:** f6e1fa5 (init); pending (Phase 0 implementation)
+**Commit:** f6e1fa5 (init), f679710 (Phase 0 implementation)
 **AI Role:** AI implemented all source files per plan specs, diagnosed and fixed `toml::Value` Eq incompatibility and schema_version Default bug. Human directed architecture, reviewed all designs.
 **Proof:** `~/.cargo/bin/cargo test -p runsible-config` — 4 tests pass; `./target/debug/runsible-config list` shows all keys with sources
 
