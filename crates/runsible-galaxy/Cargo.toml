@@ -7,6 +7,25 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-galaxy: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "runsible_galaxy"
+path = "src/lib.rs"
+
 [[bin]]
 name = "runsible-galaxy"
 path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }
+semver = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

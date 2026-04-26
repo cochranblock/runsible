@@ -24,6 +24,7 @@ impl ModuleCatalog {
             modules: IndexMap::new(),
         };
         c.register(Box::new(crate::modules::debug::DebugModule));
+        c.register(Box::new(crate::modules::ping::PingModule));
         c
     }
 

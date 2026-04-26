@@ -7,6 +7,20 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-lint: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "runsible_lint"
+path = "src/lib.rs"
+
 [[bin]]
 name = "runsible-lint"
 path = "src/main.rs"
+
+[dependencies]
+runsible-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

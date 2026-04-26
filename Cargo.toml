@@ -42,5 +42,11 @@ age = { version = "0.10", features = ["armor"] }
 base64 = "0.22"
 runsible-core = { path = "crates/runsible-core", version = "0.0.1" }
 runsible-inventory = { path = "crates/runsible-inventory", version = "0.0.1" }
+runsible-playbook = { path = "crates/runsible-playbook", version = "0.0.1" }
 runsible-connection = { path = "crates/runsible-connection", version = "0.0.1" }
 runsible-vault = { path = "crates/runsible-vault", version = "0.0.1" }
+semver = "1"
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.10"
+hex = "0.4"

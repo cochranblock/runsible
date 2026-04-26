@@ -10,6 +10,14 @@
 
 ## Entries
 
+### 2026-04-26 — Phase 3 M0: runsible, runsible-lint, runsible-doc, runsible-galaxy
+
+**What:** Implemented M0 milestones for all four Phase 3 surface-tool crates in parallel. `runsible` ad-hoc CLI: added `ping` module to playbook catalog, synthetic-playbook approach reuses engine, `runsible all -m runsible_builtin.ping -i localhost,` works. `runsible-lint`: 20 rules (L001–L020) across schema/style/safety categories, `text`+`json` output, `noqa` suppression, `.runsible-lint.toml` discovery, `--profile`/`--explain`/`--list-rules` CLI. `runsible-doc`: `ModuleDoc` schema, `DocRegistry`, hand-authored docs for `debug`+`ping`, `list`/`show`/`snippet` CLI with text/json/markdown output. `runsible-galaxy`: package manifest, `.runsible-pkg` tarball format, file:// registry index, greedy dependency resolver, `runsible.lock` r/w, `init`/`build`/`install`/`list`/`info`/`add` CLI. Workspace: 72/72 tests green.
+**Why:** These four crates are the user-facing surface of runsible. The ad-hoc CLI (`runsible`) is the first thing any new user runs. Galaxy is the package ecosystem that makes the module catalog useful beyond the builtins. Lint and doc are the quality and discoverability tools that make the ecosystem trustworthy.
+**Commit:** pending
+**AI Role:** AI implemented all four crates in parallel agent runs. Human directed Phase 3 execution, validated test suite, reviewed provenance compliance.
+**Proof:** `~/.cargo/bin/cargo test --workspace` — 72 tests pass; `./target/debug/runsible all -m runsible_builtin.ping -i localhost,` exits 0
+
 ### 2026-04-26 — Phase 2 M0: runsible-playbook engine
 
 **What:** Implemented `runsible-playbook` M0 — TOML playbook parser, object-safe `DynModule` catalog, `debug` builtin module, plan→apply execution loop, NDJSON event stream (auto-detect TTY/non-TTY), and exit codes. Smoke test: `runsible-playbook examples/hello.toml -i localhost,` emits structured NDJSON and exits 0. 6/6 tests green. Workspace at 37/37.
