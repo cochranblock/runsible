@@ -93,6 +93,8 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
+| 3a17361 | 2026-04-27 | JIT SSH CA certs + ansible-vault import + recipient rekey + pull-mode daemon |
+| 28602a8 | 2026-04-27 | gap-closure wave: filter catalog, 15 modules, --check/--diff, facts, concurrency, includes |
 | 3a46638 | 2026-04-27 | exopack TRIPLE SIMS gates per crate (14/14) + cochranblock provenance pattern |
 | bceb2e7 | 2026-04-27 | broad test coverage expansion: 148 → 354 tests workspace-wide |
 | 372bd37 | 2026-04-27 | runsible-playbook M1: roles |

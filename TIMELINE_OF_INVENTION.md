@@ -26,7 +26,7 @@ Workspace: 553/553 tests pass (was 522 before this session; +31 new). 14/14 TRIP
 
 **Why:** SSH CA certs for JIT eliminate the long-lived-key distribution problem entirely — operators hold only the CA key, mint 60-second per-task user certs, sshd enforces expiry. ansible-vault import unblocks adoption: every Ansible shop has secrets in `$ANSIBLE_VAULT` files; without an importer, runsible can't replace them. Recipient rekey makes runsible-vault the actual replacement for ansible-vault (not just "a vault that uses age"). Daemon mode lands the P2 MSP wedge — one config per tenant + systemd timer + heartbeat to a control plane = a real fleet management story.
 
-**Commit:** pending
+**Commit:** 3a17361
 **AI Role:** AI implemented all four pieces sequentially within an autonomous-loop turn, surfacing and fixing the age-grease-stanza false positive in `extract_recipients` mid-flight (age inserts random `-> /rjWR-grease` lines for stanza-injection resistance; we now filter to known recipient algorithms). Human directed the loop scope and the priority ordering.
 **Proof:** `~/.cargo/bin/cargo test --workspace` — 553 tests pass; loop running `./target/debug/<crate>-test` for all 14 crates — 14/14 print "TRIPLE SIMS: 3/3 passes OK" and exit 0.
 
