@@ -14,7 +14,7 @@
 
 **What:** Implemented M0 milestones for all three Phase 4 operator-tool crates in parallel. `runsible-pull`: git fetch from HTTPS/file:// URL via system `git`, spawn `runsible-playbook` against fetched bundle, atomic `heartbeat.json` write (`<path>.tmp` + rename), `runsible.pull.heartbeat.v1` schema, `--once`/`status`/`init` CLI. `runsible-test`: 7 sanity rules (S001–S007) over a runsible package directory, `units` runs `cargo test` over package's `crates/`, `env --show` discovery (Rust+cargo+sibling binaries), text+json output, dogfoods against the workspace itself. `runsible-console`: rustyline REPL, `<module> [k=v ...]` grammar reusing the synthetic-playbook engine pattern, colored summary line via `colored` crate, `quit`/`exit`/Ctrl-D exit cleanly. Workspace: 98/98 tests green.
 **Why:** Phase 4 ships the operator-experience surface. Pull-mode is the P2 MSP wedge (one config per tenant + systemd timer + heartbeat). The test runner is the P3 compliance wedge (signed, reproducible test runs). The console is the P4 solo/homelab wedge (interactive ad-hoc with feedback in <100ms).
-**Commit:** pending
+**Commit:** f139ffa
 **AI Role:** AI implemented all three crates in parallel agent runs. Human directed Phase 4 execution and validated dogfooding behavior.
 **Proof:** `~/.cargo/bin/cargo test --workspace` — 98 tests pass; `./target/debug/runsible-test sanity .` correctly reports S001+S007 against workspace root (expected); `echo quit | ./target/debug/runsible-console` exits clean
 
