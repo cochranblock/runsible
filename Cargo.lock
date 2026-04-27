@@ -536,7 +536,9 @@ checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
 name = "exopack"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dd74976b01ef5cfb3da785ba79e25854582008632fdcc4096ca9ea2174c2e8f"
 
 [[package]]
 name = "fastrand"
@@ -1416,7 +1418,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "runsible"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1434,7 +1436,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-config"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1450,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-connection"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1463,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-console"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1481,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "async-trait",
  "exopack",
@@ -1494,7 +1496,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-doc"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1509,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-galaxy"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1530,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-inventory"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1551,7 +1553,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-lint"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1567,7 +1569,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-playbook"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1594,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-pull"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1613,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-test"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1632,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "runsible-vault"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "aes",
  "age",
@@ -2666,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "yaml2toml"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "anyhow",
  "clap",
