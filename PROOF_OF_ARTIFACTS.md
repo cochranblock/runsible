@@ -92,6 +92,7 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
+| b720aca | 2026-04-26 | runsible-playbook M1 partial: templating, when, register, tags, handlers, set_fact, assert |
 | f139ffa | 2026-04-26 | Phase 4 M0: runsible-pull, runsible-test, runsible-console |
 | e72641f | 2026-04-26 | Phase 3 M0: runsible, runsible-lint, runsible-doc, runsible-galaxy |
 | f679710 | 2026-04-26 | Phase 0-2 M0: core, config, inventory, vault, connection, yaml2toml, playbook |
