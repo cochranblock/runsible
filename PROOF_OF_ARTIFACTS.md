@@ -92,6 +92,7 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
+| 504a470 | 2026-04-26 | runsible-playbook M1 expansion: template/package/service/systemd_service/get_url + loop/until/block |
 | 1ed0079 | 2026-04-26 | runsible-playbook M1: ExecutionContext refactor + command/shell/copy/file modules |
 | b720aca | 2026-04-26 | runsible-playbook M1 partial: templating, when, register, tags, handlers, set_fact, assert |
 | f139ffa | 2026-04-26 | Phase 4 M0: runsible-pull, runsible-test, runsible-console |
