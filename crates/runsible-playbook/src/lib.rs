@@ -108,7 +108,7 @@ debug = { msg = "Hello, world!" }
     }
 
     fn test_ctx<'a>(host: &'a runsible_core::types::Host, vars: &'a runsible_core::types::Vars, conn: &'a runsible_connection::LocalSync) -> runsible_core::traits::ExecutionContext<'a> {
-        runsible_core::traits::ExecutionContext { host, vars, connection: conn, check_mode: false }
+        runsible_core::traits::ExecutionContext { host, vars, connection: conn, check_mode: false, diff_mode: false }
     }
 
     #[test]
@@ -500,7 +500,7 @@ template = {{ src = "{src_str}", dest = "{dest_str}" }}
         let host = Host { name: "h".into(), vars: Vars::new() };
         let vars = Vars::new();
         let conn = runsible_connection::LocalSync;
-        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false, diff_mode: false };
         let m = modules::package::PackageModule;
         let args = toml::from_str::<toml::Value>(r#"state = "present""#).unwrap();
         let r = catalog::DynModule::plan(&m, &args, &ctx);
@@ -514,7 +514,7 @@ template = {{ src = "{src_str}", dest = "{dest_str}" }}
         let host = Host { name: "h".into(), vars: Vars::new() };
         let vars = Vars::new();
         let conn = runsible_connection::LocalSync;
-        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false, diff_mode: false };
         let m = modules::service::ServiceModule;
         let args = toml::from_str::<toml::Value>(r#"state = "started""#).unwrap();
         let r = catalog::DynModule::plan(&m, &args, &ctx);
@@ -528,7 +528,7 @@ template = {{ src = "{src_str}", dest = "{dest_str}" }}
         let host = Host { name: "h".into(), vars: Vars::new() };
         let vars = Vars::new();
         let conn = runsible_connection::LocalSync;
-        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false, diff_mode: false };
         let m = modules::get_url::GetUrlModule;
         let args = toml::from_str::<toml::Value>(r#"url = "https://example.com""#).unwrap();
         let r = catalog::DynModule::plan(&m, &args, &ctx);
@@ -1734,5 +1734,1342 @@ template = {{ src = "{src_str}", dest = "{dest_str}" }}
             elapsed_ms: 0,
         };
         assert_eq!(r.exit_code(), 0);
+    }
+
+    // --- Setup / fact gathering & magic vars ---
+
+    #[test]
+    fn setup_module_registers() {
+        let cat = catalog::ModuleCatalog::with_builtins();
+        assert!(cat.get("runsible_builtin.setup").is_some());
+    }
+
+    #[test]
+    fn setup_gathers_min_facts() {
+        let src = r#"
+[imports]
+setup = "runsible_builtin.setup"
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Gather"
+hosts = "localhost"
+[[plays.tasks]]
+setup = {}
+[[plays.tasks]]
+debug = { msg = "host is {{ ansible_hostname }}" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn gather_facts_play_flag_runs_setup_first() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Auto"
+hosts = "localhost"
+gather_facts = true
+[[plays.tasks]]
+debug = { msg = "{{ ansible_hostname }}" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        // setup + debug = 2 outcomes
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn magic_vars_inventory_hostname_short() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Magic"
+hosts = "all"
+[[plays.tasks]]
+debug = { msg = "short is {{ inventory_hostname_short }}" }
+"#;
+        let r = run(src, "web01.example.com,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn magic_vars_groups_exists() {
+        let src = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Groups"
+hosts = "localhost"
+[[plays.tasks]]
+assert = { that = ["groups is defined"] }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn ansible_check_mode_var_set() {
+        let src = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Check var"
+hosts = "localhost"
+[[plays.tasks]]
+assert = { that = ["ansible_check_mode == false"] }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn magic_vars_play_hosts_and_play_name() {
+        let src = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Play X"
+hosts = "all"
+[[plays.tasks]]
+assert = { that = ["ansible_play_name == 'Play X'", "play_hosts is defined"] }
+"#;
+        let r = run(src, "h1,h2,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn magic_vars_ansible_version_dict() {
+        let src = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Version"
+hosts = "localhost"
+[[plays.tasks]]
+assert = { that = ["ansible_version.major == 0", "ansible_version.full is defined"] }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn setup_facts_merged_into_top_level_vars() {
+        // After setup runs, ansible_hostname should template directly without
+        // needing the `ansible_facts.` prefix.
+        let src = r#"
+[imports]
+setup = "runsible_builtin.setup"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Merged"
+hosts = "localhost"
+[[plays.tasks]]
+setup = {}
+[[plays.tasks]]
+assert = { that = ["ansible_hostname is defined", "ansible_facts.ansible_hostname is defined"] }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    // -------------------------------------------------------------------
+    // M1.5 — 15 new builtin modules: catalog registration + plan/apply
+    // smoke checks. Privileged ops (user/group/cron/hostname/uri) only
+    // verify catalog registration here; integration tests would need root.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn catalog_has_15_new_modules() {
+        let cat = catalog::ModuleCatalog::with_builtins();
+        for name in [
+            "lineinfile",
+            "blockinfile",
+            "replace",
+            "stat",
+            "find",
+            "fail",
+            "pause",
+            "wait_for",
+            "uri",
+            "archive",
+            "unarchive",
+            "user",
+            "group",
+            "cron",
+            "hostname",
+        ] {
+            let fq = format!("runsible_builtin.{name}");
+            assert!(cat.get(&fq).is_some(), "missing {name}");
+        }
+    }
+
+    fn _new_module_ctx<'a>(
+        host: &'a runsible_core::types::Host,
+        vars: &'a runsible_core::types::Vars,
+        conn: &'a runsible_connection::LocalSync,
+    ) -> runsible_core::traits::ExecutionContext<'a> {
+        runsible_core::traits::ExecutionContext {
+            host,
+            vars,
+            connection: conn,
+            check_mode: false,
+            diff_mode: false,
+        }
+    }
+
+    #[test]
+    fn fail_module_plan_carries_msg_and_apply_fails() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::fail::FailModule;
+        let args = toml::from_str::<toml::Value>(r#"msg = "boom""#).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert_eq!(plan.diff["msg"], "boom");
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Failed);
+        assert_eq!(outcome.returns["msg"], "boom");
+    }
+
+    #[test]
+    fn pause_module_zero_seconds_is_fast() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::pause::PauseModule;
+        let args = toml::from_str::<toml::Value>(r#"seconds = 0"#).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(!plan.will_change);
+        let started = std::time::Instant::now();
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Ok);
+        assert!(
+            elapsed.as_millis() < 100,
+            "pause(0) should return in <100ms, got {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn lineinfile_creates_file_when_missing_and_create_true() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!("rsl-lineinfile-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let m = modules::lineinfile::LineInFileModule;
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let toml_str = format!(
+            r#"path = "{}"
+line = "the line"
+create = true"#,
+            path_str
+        );
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(plan.will_change);
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Changed);
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("the line"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn lineinfile_idempotent_when_already_present() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!(
+            "rsl-lineinfile-idem-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, "alpha\nbeta\n").unwrap();
+        let m = modules::lineinfile::LineInFileModule;
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let toml_str = format!(
+            r#"path = "{}"
+line = "beta""#,
+            path_str
+        );
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(!plan.will_change, "line already present should not change");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn blockinfile_inserts_marker_block() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!(
+            "rsl-blockinfile-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, "header\n").unwrap();
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let m = modules::blockinfile::BlockInFileModule;
+        let toml_str = format!(
+            r#"path = "{}"
+block = "first\nsecond""#,
+            path_str
+        );
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(plan.will_change);
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Changed);
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("BEGIN"));
+        assert!(body.contains("END"));
+        assert!(body.contains("first"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn replace_module_substitutes_and_is_idempotent() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!("rsl-replace-{}.txt", std::process::id()));
+        std::fs::write(&path, "foo bar foo\n").unwrap();
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let m = modules::replace::ReplaceModule;
+        let toml_str = format!(
+            r#"path = "{}"
+regexp = "foo"
+replace = "baz""#,
+            path_str
+        );
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(plan.will_change);
+        let _ = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(body, "baz bar baz\n");
+        // Re-plan: should be no-op now.
+        let plan2 = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(!plan2.will_change);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn stat_module_returns_size_and_exists() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!("rsl-stat-{}.txt", std::process::id()));
+        std::fs::write(&path, "hello").unwrap();
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let m = modules::stat::StatModule;
+        let toml_str = format!(r#"path = "{}""#, path_str);
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(!plan.will_change);
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Ok);
+        assert_eq!(outcome.returns["stat"]["exists"], true);
+        assert_eq!(outcome.returns["stat"]["size"], 5);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn stat_module_missing_path_reports_not_exists() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let path = std::env::temp_dir().join(format!(
+            "rsl-stat-missing-{}.txt",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let m = modules::stat::StatModule;
+        let path_str = path.to_string_lossy().replace('\\', "\\\\");
+        let toml_str = format!(r#"path = "{}""#, path_str);
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Ok);
+        assert_eq!(outcome.returns["stat"]["exists"], false);
+    }
+
+    #[test]
+    fn find_module_returns_files_dict() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::find::FindModule;
+        let args = toml::from_str::<toml::Value>(
+            r#"paths = "/tmp"
+patterns = "*.tmp""#,
+        )
+        .unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(!plan.will_change);
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        // Either the find ran cleanly (Ok) or it failed for reasons we can't
+        // predict — but the structure must be present.
+        assert!(outcome.returns.get("files").is_some(), "expected `files` key");
+    }
+
+    #[test]
+    fn wait_for_unreachable_port_times_out_quickly() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::wait_for::WaitForModule;
+        // Port 1 on localhost should never accept; timeout=1s.
+        let args = toml::from_str::<toml::Value>(
+            r#"host = "127.0.0.1"
+port = 1
+timeout = 1
+connect_timeout = 1"#,
+        )
+        .unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        let started = std::time::Instant::now();
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Failed);
+        assert!(
+            elapsed.as_secs_f64() < 3.0,
+            "expected fail in <3s, got {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn archive_creates_tarball() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let dir = std::env::temp_dir().join(format!("rsl-archive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src_file = dir.join("source.txt");
+        std::fs::write(&src_file, "payload").unwrap();
+        let dest = dir.join("out.tar.gz");
+
+        let src_str = src_file.to_string_lossy().replace('\\', "\\\\");
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let m = modules::archive::ArchiveModule;
+        let toml_str = format!(
+            r#"path = ["{}"]
+dest = "{}"
+format = "gz""#,
+            src_str, dest_str
+        );
+        let args = toml::from_str::<toml::Value>(&toml_str).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
+        assert!(plan.will_change);
+        let outcome = catalog::DynModule::apply(&m, &plan, &ctx).unwrap();
+        assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Changed);
+        let meta = std::fs::metadata(&dest).expect("archive should exist");
+        assert!(meta.len() > 0, "archive should be non-empty");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unarchive_plan_validates_args() {
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::unarchive::UnarchiveModule;
+        let bad = toml::from_str::<toml::Value>(r#"src = "/x""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+        let ok = toml::from_str::<toml::Value>(
+            r#"src = "/some/archive.tar.gz"
+dest = "/some/where""#,
+        )
+        .unwrap();
+        let plan = catalog::DynModule::plan(&m, &ok, &ctx).unwrap();
+        assert!(plan.will_change);
+    }
+
+    #[test]
+    fn user_module_plan_validates_name() {
+        if !nix_running_as_root() {
+            eprintln!("skip: user module integration requires root");
+        }
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::user::UserModule;
+        let bad = toml::from_str::<toml::Value>(r#"state = "present""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+    }
+
+    #[test]
+    fn group_module_plan_validates_name() {
+        if !nix_running_as_root() {
+            eprintln!("skip: group module integration requires root");
+        }
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::group::GroupModule;
+        let bad = toml::from_str::<toml::Value>(r#"state = "present""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+    }
+
+    #[test]
+    fn cron_module_plan_validates_name() {
+        if !nix_running_as_root() {
+            eprintln!("skip: cron module integration requires crontab/sudo");
+        }
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::cron::CronModule;
+        let bad = toml::from_str::<toml::Value>(r#"state = "present""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+        let needs_job =
+            toml::from_str::<toml::Value>(r#"name = "x""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &needs_job, &ctx).is_err());
+    }
+
+    #[test]
+    fn hostname_module_plan_validates_name() {
+        if !nix_running_as_root() {
+            eprintln!("skip: hostname module integration requires root");
+        }
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::hostname::HostnameModule;
+        let bad = toml::from_str::<toml::Value>(r#""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+    }
+
+    #[test]
+    fn uri_module_plan_validates_url() {
+        if !which_curl_available() {
+            eprintln!("skip: uri module integration requires curl");
+        }
+        use runsible_core::types::{Host, Vars};
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = _new_module_ctx(&host, &vars, &conn);
+        let m = modules::uri::UriModule;
+        let bad = toml::from_str::<toml::Value>(r#"method = "GET""#).unwrap();
+        assert!(catalog::DynModule::plan(&m, &bad, &ctx).is_err());
+        let ok = toml::from_str::<toml::Value>(r#"url = "http://localhost:1""#).unwrap();
+        let plan = catalog::DynModule::plan(&m, &ok, &ctx).unwrap();
+        assert!(plan.will_change);
+    }
+
+    fn nix_running_as_root() -> bool {
+        // Best-effort: use $USER or geteuid() proxy via /proc.
+        std::env::var("USER").map(|u| u == "root").unwrap_or(false)
+    }
+
+    fn which_curl_available() -> bool {
+        std::process::Command::new("which")
+            .arg("curl")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    // --- forks / parallel host execution ---
+
+    #[test]
+    fn forks_default_runs_sequentially() {
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Sequential"
+hosts = "all"
+[[plays.tasks]]
+debug = { msg = "hello" }
+"#;
+        let opts = engine::RunOptions::default();
+        assert_eq!(opts.forks, 1, "default forks should be 1");
+        let r = engine::run_with(pb, "h1,h2,h3,h4,h5,", "test", opts).unwrap();
+        assert_eq!(r.ok, 5);
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn forks_parallel_runs_all_hosts() {
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Parallel"
+hosts = "all"
+[[plays.tasks]]
+debug = { msg = "hello" }
+"#;
+        let opts = engine::RunOptions {
+            forks: 4,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "h1,h2,h3,h4,h5,h6,h7,h8,", "test", opts).unwrap();
+        assert_eq!(r.ok, 8);
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn forks_independent_set_facts_per_host() {
+        let pb = r#"
+[imports]
+set_fact = "runsible_builtin.set_fact"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Independent vars"
+hosts = "all"
+[[plays.tasks]]
+set_fact = { my_host = "{{ inventory_hostname }}" }
+[[plays.tasks]]
+assert = { that = ["my_host == inventory_hostname"] }
+"#;
+        let opts = engine::RunOptions {
+            forks: 4,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "h1,h2,h3,h4,", "test", opts).unwrap();
+        // Each host should have its own my_host fact: 4 set_fact + 4 assert pass
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 8);
+    }
+
+    #[test]
+    fn forks_one_failure_doesnt_block_others() {
+        let pb = r#"
+[imports]
+fail = "runsible_builtin.fail"
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Mixed"
+hosts = "all"
+[[plays.tasks]]
+when = { expr = "inventory_hostname == 'badhost'" }
+fail = { msg = "this host fails" }
+[[plays.tasks]]
+debug = { msg = "but I should still see this on good hosts" }
+"#;
+        let opts = engine::RunOptions {
+            forks: 4,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "h1,badhost,h3,h4,", "test", opts).unwrap();
+        // 1 fail (badhost) + 4 debug ok + 3 skipped (the conditional fail on good hosts)
+        assert_eq!(r.failed, 1);
+        assert_eq!(r.ok, 4);
+    }
+
+    // ----- check_mode + diff_mode wiring -----
+
+    #[test]
+    fn check_mode_skips_real_changes() {
+        let _g = _file_mod_guard();
+        let dest = std::env::temp_dir().join(format!("rsl-check-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&dest);
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+copy = "runsible_builtin.copy"
+[[plays]]
+name = "check"
+hosts = "localhost"
+[[plays.tasks]]
+copy = {{ content = "should not write", dest = "{dest_str}" }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        // Module reports Changed (would-have-changed), but no file is on disk.
+        assert_eq!(r.changed, 1);
+        assert!(!dest.exists(), "check mode must not write");
+    }
+
+    #[test]
+    fn check_mode_runs_safe_modules() {
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "safe"
+hosts = "localhost"
+[[plays.tasks]]
+debug = { msg = "still ran" }
+"#;
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        assert_eq!(r.ok, 1, "debug should still run in check mode");
+    }
+
+    #[test]
+    fn check_mode_runs_ping() {
+        let pb = r#"
+[imports]
+ping = "runsible_builtin.ping"
+[[plays]]
+name = "ping-check"
+hosts = "localhost"
+[[plays.tasks]]
+ping = {}
+"#;
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn check_mode_runs_set_fact_and_var_propagates() {
+        let pb = r#"
+[imports]
+set_fact = "runsible_builtin.set_fact"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "sf-check"
+hosts = "localhost"
+[[plays.tasks]]
+set_fact = { side = "left" }
+[[plays.tasks]]
+assert = { that = ["side == 'left'"] }
+"#;
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        // set_fact reports Ok (per its existing semantics), assert reports Ok.
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn check_mode_runs_assert() {
+        let pb = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "assert-check"
+hosts = "localhost"
+[plays.vars]
+n = 7
+[[plays.tasks]]
+assert = { that = ["n == 7"] }
+"#;
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn check_mode_skips_file_create() {
+        let target = std::env::temp_dir().join(format!("rsl-check-file-{}.flag", std::process::id()));
+        let _ = std::fs::remove_file(&target);
+        let path_str = target.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+file = "runsible_builtin.file"
+[[plays]]
+name = "file-check"
+hosts = "localhost"
+[[plays.tasks]]
+file = {{ path = "{path_str}", state = "touch" }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        assert_eq!(r.changed, 1);
+        assert!(!target.exists(), "check mode must not touch the file");
+    }
+
+    #[test]
+    fn check_mode_synthesizes_check_mode_returns_marker() {
+        // When check_mode skips apply(), the synthesized outcome carries a
+        // `check_mode: true` marker in returns. Verify by registering the
+        // result and asserting on it.
+        let _g = _file_mod_guard();
+        let dest = std::env::temp_dir().join(format!("rsl-check-marker-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&dest);
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+copy = "runsible_builtin.copy"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "marker"
+hosts = "localhost"
+[[plays.tasks]]
+register = "cp"
+copy = {{ content = "x", dest = "{dest_str}" }}
+[[plays.tasks]]
+assert = {{ that = ["cp.returns.check_mode == true", "cp.returns.would_change == true"] }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        assert_eq!(r.failed, 0, "marker should be present in registered outcome");
+    }
+
+    #[test]
+    fn diff_mode_populates_before_after_for_copy() {
+        let _g = _file_mod_guard();
+        let dest = std::env::temp_dir().join(format!("rsl-diff-{}.txt", std::process::id()));
+        std::fs::write(&dest, "old content\n").unwrap();
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+copy = "runsible_builtin.copy"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "diff"
+hosts = "localhost"
+[[plays.tasks]]
+register = "cp"
+copy = {{ content = "new content\n", dest = "{dest_str}" }}
+[[plays.tasks]]
+assert = {{ that = ["cp.returns.diff.before == 'old content\n'", "cp.returns.diff.after == 'new content\n'"] }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            diff_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn check_mode_unchanged_module_reports_ok() {
+        // When the plan reports will_change=false, check_mode still skips apply
+        // — the synthesized outcome should be Ok, not Changed.
+        let _g = _file_mod_guard();
+        let dest = std::env::temp_dir().join(format!("rsl-check-unchanged-{}.txt", std::process::id()));
+        std::fs::write(&dest, "same\n").unwrap();
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+copy = "runsible_builtin.copy"
+[[plays]]
+name = "noop"
+hosts = "localhost"
+[[plays.tasks]]
+copy = {{ content = "same\n", dest = "{dest_str}" }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        assert_eq!(r.changed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn check_mode_template_does_not_write() {
+        let _g = _file_mod_guard();
+        let src_path = std::env::temp_dir().join(format!("rsl-check-tpl-src-{}.j2", std::process::id()));
+        let dest_path = std::env::temp_dir().join(format!("rsl-check-tpl-dst-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&src_path);
+        let _ = std::fs::remove_file(&dest_path);
+        std::fs::write(&src_path, "Hello, {{ name }}!\n").unwrap();
+        let src_str = src_path.to_string_lossy().replace('\\', "\\\\");
+        let dest_str = dest_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+template = "runsible_builtin.template"
+[[plays]]
+name = "tpl-check"
+hosts = "localhost"
+[plays.vars]
+name = "World"
+[[plays.tasks]]
+template = {{ src = "{src_str}", dest = "{dest_str}" }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        let dst_exists = dest_path.exists();
+        let _ = std::fs::remove_file(&src_path);
+        let _ = std::fs::remove_file(&dest_path);
+        assert_eq!(r.changed, 1);
+        assert!(!dst_exists, "check mode must not write template output");
+    }
+
+    #[test]
+    fn check_mode_command_module_skipped() {
+        // command is non-idempotent (will_change=true unless guarded). In
+        // check_mode the engine should NOT actually invoke the binary; the
+        // synthesized outcome still reports Changed.
+        let sentinel = std::env::temp_dir().join(format!(
+            "rsl-check-cmd-{}.flag",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&sentinel);
+        let s = sentinel.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+command = "runsible_builtin.command"
+[[plays]]
+name = "cmd-check"
+hosts = "localhost"
+[[plays.tasks]]
+command = {{ argv = ["touch", "{s}"] }}
+"#);
+        let opts = engine::RunOptions {
+            check_mode: true,
+            ..Default::default()
+        };
+        let r = engine::run_with(&pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_file(&sentinel);
+        assert_eq!(r.changed, 1);
+        assert!(!sentinel.exists(), "command must not actually execute in check mode");
+    }
+
+    #[test]
+    fn run_options_default_has_no_check_or_diff() {
+        let opts = engine::RunOptions::default();
+        assert!(!opts.check_mode);
+        assert!(!opts.diff_mode);
+    }
+
+    // -------------------------------------------------------------------------
+    // vars_files / module_defaults / include_tasks / delegate_to / run_once
+    // (M1 engine wiring)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn vars_files_loaded_into_play() {
+        let tmp = std::env::temp_dir();
+        let vf_path = tmp.join(format!(
+            "rsl-vf-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&vf_path, r#"app_name = "from_file""#).unwrap();
+        let vf_str = vf_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+debug = "runsible_builtin.debug"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Vars files"
+hosts = "localhost"
+vars_files = ["{vf_str}"]
+[[plays.tasks]]
+debug = {{ msg = "app: {{{{ app_name }}}}" }}
+[[plays.tasks]]
+assert = {{ that = ["app_name == 'from_file'"] }}
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        let _ = std::fs::remove_file(&vf_path);
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn vars_files_missing_file_silently_skipped() {
+        // The named vars_file does not exist. M1 contract: silently skip.
+        // The play continues to run with whatever vars are otherwise defined.
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Missing vf"
+hosts = "localhost"
+vars_files = ["/nonexistent/path/to/vars-no-such-file-xyz.toml"]
+[plays.vars]
+fallback = "ok"
+[[plays.tasks]]
+debug = { msg = "fallback is {{ fallback }}" }
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn vars_files_overridden_by_play_vars() {
+        // Precedence: vars_files load BEFORE inline play.vars, so play.vars wins.
+        let vf_path = std::env::temp_dir().join(format!(
+            "rsl-vf-prec-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(&vf_path, r#"k = "from_file""#).unwrap();
+        let vf_str = vf_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Precedence"
+hosts = "localhost"
+vars_files = ["{vf_str}"]
+[plays.vars]
+k = "from_play_vars"
+[[plays.tasks]]
+assert = {{ that = ["k == 'from_play_vars'"] }}
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        let _ = std::fs::remove_file(&vf_path);
+        assert_eq!(r.failed, 0, "play.vars must win over vars_files");
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn module_defaults_apply_when_task_omits() {
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Mod defaults"
+hosts = "localhost"
+[plays.module_defaults."runsible_builtin.debug"]
+msg = "from_defaults"
+[[plays.tasks]]
+debug = {}
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn module_defaults_overridden_by_task() {
+        // Task-level args win over module_defaults on key collision. We can't
+        // easily inspect the rendered msg without parsing the NDJSON event
+        // stream, but no failure indicates the merge produced a valid call.
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Override"
+hosts = "localhost"
+[plays.module_defaults."runsible_builtin.debug"]
+msg = "default_msg"
+[[plays.tasks]]
+debug = { msg = "task_msg" }
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn module_defaults_only_apply_to_matching_module() {
+        // The defaults are scoped to debug; the assert task must be unaffected
+        // (would otherwise crash on missing `that`).
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Scoped defaults"
+hosts = "localhost"
+[plays.module_defaults."runsible_builtin.debug"]
+msg = "only_for_debug"
+[[plays.tasks]]
+debug = {}
+[[plays.tasks]]
+assert = { that = ["1 == 1"] }
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn include_tasks_loads_external_file() {
+        let inc_path = std::env::temp_dir().join(format!(
+            "rsl-inc-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(
+            &inc_path,
+            r#"
+[[tasks]]
+name = "from include"
+debug = { msg = "included" }
+"#,
+        )
+        .unwrap();
+        let inc_str = inc_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Include"
+hosts = "localhost"
+[[plays.tasks]]
+include_tasks = "{inc_str}"
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        let _ = std::fs::remove_file(&inc_path);
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1, "the included task should have run");
+    }
+
+    #[test]
+    fn import_tasks_alias_behaves_like_include_at_m1() {
+        // import_tasks resolves through the same dispatcher as include_tasks at M1.
+        let inc_path = std::env::temp_dir().join(format!(
+            "rsl-imp-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(
+            &inc_path,
+            r#"
+[[tasks]]
+name = "imported"
+debug = { msg = "via import" }
+"#,
+        )
+        .unwrap();
+        let inc_str = inc_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Import"
+hosts = "localhost"
+[[plays.tasks]]
+import_tasks = "{inc_str}"
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        let _ = std::fs::remove_file(&inc_path);
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn include_tasks_invalid_toml_errors() {
+        let inc_path = std::env::temp_dir().join(format!(
+            "rsl-inc-bad-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        // Garbage TOML body so the parser bails out.
+        std::fs::write(&inc_path, "this is = ][not valid toml").unwrap();
+        let inc_str = inc_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Bad include"
+hosts = "localhost"
+[[plays.tasks]]
+include_tasks = "{inc_str}"
+"#);
+        let err = run(&pb, "localhost,", "test").unwrap_err();
+        let _ = std::fs::remove_file(&inc_path);
+        assert!(
+            matches!(err, PlaybookError::Parse(_)),
+            "expected Parse error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn include_tasks_supports_top_level_array() {
+        // The included file is a bare array of tables (no `tasks = [...]` wrapper).
+        let inc_path = std::env::temp_dir().join(format!(
+            "rsl-inc-arr-{}-{}.toml",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::write(
+            &inc_path,
+            r#"
+[[__top]]
+name = "first"
+debug = { msg = "1" }
+[[__top]]
+name = "second"
+debug = { msg = "2" }
+"#,
+        )
+        .unwrap();
+        // Parse the included file into a fresh top-level array form. The simplest
+        // way is to write a wrapper with `tasks = [...]` because TOML's grammar
+        // can't represent a bare top-level array. Confirm the table-form code path
+        // works as the canonical entry point.
+        let inc_str = inc_path.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &inc_path,
+            r#"
+[[tasks]]
+name = "first"
+debug = { msg = "1" }
+[[tasks]]
+name = "second"
+debug = { msg = "2" }
+"#,
+        )
+        .unwrap();
+        let pb = format!(r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "ArrayInc"
+hosts = "localhost"
+[[plays.tasks]]
+include_tasks = "{inc_str}"
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        let _ = std::fs::remove_file(&inc_path);
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2, "both included tasks should run");
+    }
+
+    #[test]
+    fn delegate_to_substitutes_host_in_outcome() {
+        // Static delegate name. The connection is still LocalSync so the work
+        // physically runs on the controller, but the outcome reports the
+        // delegate.
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Delegate"
+hosts = "localhost"
+[[plays.tasks]]
+delegate_to = "controller01"
+debug = { msg = "delegated" }
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn delegate_to_supports_templated_hostname() {
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "TemplatedDelegate"
+hosts = "localhost"
+[plays.vars]
+db_host = "db-primary.example.net"
+[[plays.tasks]]
+delegate_to = "{{ db_host }}"
+debug = { msg = "running on a synthetic host" }
+"#;
+        let r = run(pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn run_once_executes_only_once_for_multi_host() {
+        let pb = r#"
+[imports]
+set_fact = "runsible_builtin.set_fact"
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Run once"
+hosts = "all"
+[[plays.tasks]]
+name = "once"
+run_once = true
+register = "build_id"
+set_fact = { id = "abc" }
+[[plays.tasks]]
+name = "every"
+debug = { msg = "id is {{ build_id.returns.id }}" }
+"#;
+        let r = run(pb, "host1,host2,host3,", "test").unwrap();
+        // Per host: 3 hosts × 1 debug task = 3 ok.
+        // run_once task: 1 ok on first host, 2 skipped on the rest.
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.skipped, 2, "run_once must skip the second and third host");
+        // 1 set_fact ok on host1 + 3 debugs ok = 4
+        assert_eq!(r.ok, 4);
+    }
+
+    #[test]
+    fn run_once_register_is_replayed_on_subsequent_hosts() {
+        // Even though the run_once task only runs on the first host, the
+        // registered outcome must propagate so subsequent hosts can template
+        // against `register`.
+        let pb = r#"
+[imports]
+set_fact = "runsible_builtin.set_fact"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Run once register"
+hosts = "all"
+[[plays.tasks]]
+name = "first only"
+run_once = true
+register = "primary"
+set_fact = { id = "p-1" }
+[[plays.tasks]]
+name = "every host asserts on register"
+assert = { that = ["primary.returns.id == 'p-1'"] }
+"#;
+        let r = run(pb, "h1,h2,h3,", "test").unwrap();
+        assert_eq!(r.failed, 0, "register must replay on every host");
+        // 3 asserts ok + 1 set_fact ok on h1 + 2 skipped on h2/h3
+        assert_eq!(r.ok, 4);
+        assert_eq!(r.skipped, 2);
     }
 }

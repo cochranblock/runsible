@@ -17,6 +17,10 @@ impl DynModule for DebugModule {
         "runsible_builtin.debug"
     }
 
+    fn check_mode_safe(&self) -> bool {
+        true
+    }
+
     fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let msg = extract_msg(args);
         Ok(Plan {

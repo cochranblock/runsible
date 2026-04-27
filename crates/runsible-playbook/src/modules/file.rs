@@ -50,15 +50,39 @@ impl DynModule for FileModule {
             ))),
         };
 
+        let mut diff = serde_json::json!({
+            "path": path,
+            "state": state,
+            "mode": mode,
+            "currently_exists": exists,
+        });
+        if ctx.diff_mode {
+            let before = if exists {
+                // Best-effort: try to disambiguate file vs directory.
+                if std::path::Path::new(&path).is_dir() {
+                    "directory"
+                } else {
+                    "file"
+                }
+            } else {
+                "absent"
+            };
+            let after = match state.as_str() {
+                "absent" => "absent",
+                "directory" => "directory",
+                "present" | "touch" => "file",
+                _ => state.as_str(),
+            };
+            if let Some(obj) = diff.as_object_mut() {
+                obj.insert("before".into(), serde_json::Value::String(before.into()));
+                obj.insert("after".into(), serde_json::Value::String(after.into()));
+            }
+        }
+
         Ok(Plan {
             module: self.module_name().into(),
             host: ctx.host.name.clone(),
-            diff: serde_json::json!({
-                "path": path,
-                "state": state,
-                "mode": mode,
-                "currently_exists": exists,
-            }),
+            diff,
             will_change,
         })
     }

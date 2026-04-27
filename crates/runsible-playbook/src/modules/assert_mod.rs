@@ -25,6 +25,10 @@ impl DynModule for AssertModule {
         "runsible_builtin.assert"
     }
 
+    fn check_mode_safe(&self) -> bool {
+        true
+    }
+
     fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let that = toml_to_json(args.get("that").unwrap_or(&toml::Value::Array(vec![])));
         let fail_msg = args

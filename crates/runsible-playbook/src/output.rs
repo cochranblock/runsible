@@ -4,6 +4,7 @@ use std::io::{self, IsTerminal, Write};
 
 use runsible_core::event::Event;
 
+#[derive(Clone, Copy)]
 pub enum OutputMode {
     Ndjson,
     Pretty,
@@ -68,7 +69,20 @@ fn pretty_print(event: &Event) {
                 .and_then(|v| v.as_str())
                 .map(|s| format!("  => {s}"))
                 .unwrap_or_default();
-            println!("  {label}: [{}]{msg}", outcome.host);
+            let check_tag = if outcome
+                .returns
+                .get("check_mode")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                " (check)"
+            } else {
+                ""
+            };
+            println!("  {label}{check_tag}: [{}]{msg}", outcome.host);
+            if let Some(diff_block) = render_diff_block(&outcome.returns) {
+                print!("{diff_block}");
+            }
         }
         Event::PlayEnd { ok, changed, failed, unreachable, skipped, .. } => {
             println!("\n  ok={ok}  changed={changed}  failed={failed}  unreachable={unreachable}  skipped={skipped}");
@@ -87,4 +101,46 @@ fn pretty_print(event: &Event) {
         }
         _ => {}
     }
+}
+
+/// Pull `before`/`after` strings out of an outcome's `returns` (or its embedded
+/// `diff` sub-object, as produced by check-mode synthesized outcomes) and
+/// render a minimal unified-style diff. Returns `None` if neither side is
+/// present.
+fn render_diff_block(returns: &serde_json::Value) -> Option<String> {
+    // Two shapes:
+    //   1. returns.before / returns.after  (rare — modules don't currently emit)
+    //   2. returns.diff.before / returns.diff.after  (check_mode synth path,
+    //      and diff_mode-enabled mutating modules forwarding via plan.diff)
+    let (before, after) = if let (Some(b), Some(a)) = (
+        returns.get("before").and_then(|v| v.as_str()),
+        returns.get("after").and_then(|v| v.as_str()),
+    ) {
+        (b, a)
+    } else if let Some(diff) = returns.get("diff") {
+        let b = diff.get("before").and_then(|v| v.as_str())?;
+        let a = diff.get("after").and_then(|v| v.as_str())?;
+        (b, a)
+    } else {
+        return None;
+    };
+
+    if before == after {
+        return None;
+    }
+
+    let mut out = String::new();
+    out.push_str("    --- before\n");
+    out.push_str("    +++ after\n");
+    for line in before.lines() {
+        out.push_str("    -");
+        out.push_str(line);
+        out.push('\n');
+    }
+    for line in after.lines() {
+        out.push_str("    +");
+        out.push_str(line);
+        out.push('\n');
+    }
+    Some(out)
 }

@@ -70,6 +70,7 @@ pub struct ExecutionContext<'a> {
     pub vars: &'a crate::types::Vars,
     pub connection: &'a dyn SyncConnection,
     pub check_mode: bool,
+    pub diff_mode: bool,
 }
 
 #[derive(Debug, Clone)]

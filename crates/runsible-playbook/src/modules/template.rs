@@ -55,24 +55,39 @@ impl DynModule for TemplateModule {
         let desired = rendered.as_bytes().to_vec();
 
         let mut will_change = true;
+        let mut current_bytes: Option<Vec<u8>> = None;
         if ctx.connection.file_exists(Path::new(&dest)).unwrap_or(false) {
             if let Ok(current) = ctx.connection.slurp(Path::new(&dest)) {
                 if current == desired {
                     will_change = false;
                 }
+                current_bytes = Some(current);
+            }
+        }
+
+        let mut diff = serde_json::json!({
+            "src": src,
+            "dest": dest,
+            "mode": mode,
+            "rendered": rendered,
+            "size_bytes": desired.len(),
+        });
+        if ctx.diff_mode {
+            let before = current_bytes
+                .as_deref()
+                .map(bytes_to_diff_string)
+                .unwrap_or_default();
+            let after = bytes_to_diff_string(&desired);
+            if let Some(obj) = diff.as_object_mut() {
+                obj.insert("before".into(), serde_json::Value::String(before));
+                obj.insert("after".into(), serde_json::Value::String(after));
             }
         }
 
         Ok(Plan {
             module: self.module_name().into(),
             host: ctx.host.name.clone(),
-            diff: serde_json::json!({
-                "src": src,
-                "dest": dest,
-                "mode": mode,
-                "rendered": rendered,
-                "size_bytes": desired.len(),
-            }),
+            diff,
             will_change,
         })
     }
@@ -130,5 +145,14 @@ impl DynModule for TemplateModule {
                 "mode": plan.diff["mode"],
             }),
         })
+    }
+}
+
+/// Decode bytes for diff display. UTF-8 strings pass through; other bytes
+/// produce the placeholder `"<binary>"`.
+fn bytes_to_diff_string(b: &[u8]) -> String {
+    match std::str::from_utf8(b) {
+        Ok(s) => s.to_string(),
+        Err(_) => "<binary>".to_string(),
     }
 }

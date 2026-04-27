@@ -2,7 +2,7 @@
 
 use indexmap::IndexMap;
 
-use crate::ast::{Playbook, Task, BLOCK_SENTINEL, TASK_META_KEYS};
+use crate::ast::{Playbook, Task, BLOCK_SENTINEL, INCLUDE_SENTINEL, TASK_META_KEYS};
 use crate::errors::{PlaybookError, Result};
 
 pub fn parse_playbook(src: &str) -> Result<Playbook> {
@@ -72,6 +72,55 @@ pub fn resolve_task(raw: &toml::Value, imports: &IndexMap<String, String>) -> Re
         .cloned()
         .unwrap_or_default();
     let is_block = !block.is_empty() || !rescue.is_empty() || !always.is_empty();
+
+    // delegate_to / run_once are task-level options that orthogonally apply to
+    // the dispatch (or the include short-circuit below). Read them up front so
+    // every code path below can attach them to the resolved Task uniformly.
+    let delegate_to = table
+        .get("delegate_to")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let run_once = table
+        .get("run_once")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // include_tasks / import_tasks short-circuit. Both behave identically at M1
+    // (truly-static import semantics are M2). The path is stashed into `args`
+    // as a TOML string so the engine can read it back without a special field.
+    if let Some(path_v) = table
+        .get("include_tasks")
+        .or_else(|| table.get("import_tasks"))
+    {
+        let path = path_v
+            .as_str()
+            .ok_or_else(|| {
+                PlaybookError::TypeCheck(
+                    "include_tasks/import_tasks must be a string path".into(),
+                )
+            })?
+            .to_string();
+        return Ok(Task {
+            name,
+            module_name: INCLUDE_SENTINEL.to_string(),
+            args: toml::Value::String(path),
+            register,
+            tags,
+            when,
+            notify,
+            loop_items: None,
+            loop_var: "item".to_string(),
+            loop_label: None,
+            until: None,
+            retries: 3,
+            delay_seconds: 5,
+            block: Vec::new(),
+            rescue: Vec::new(),
+            always: Vec::new(),
+            delegate_to,
+            run_once,
+        });
+    }
 
     let module_keys: Vec<&str> = table
         .keys()
@@ -154,6 +203,8 @@ pub fn resolve_task(raw: &toml::Value, imports: &IndexMap<String, String>) -> Re
         block,
         rescue,
         always,
+        delegate_to,
+        run_once,
     })
 }
 

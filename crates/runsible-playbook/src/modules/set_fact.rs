@@ -24,6 +24,10 @@ impl DynModule for SetFactModule {
         "runsible_builtin.set_fact"
     }
 
+    fn check_mode_safe(&self) -> bool {
+        true
+    }
+
     fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let diff = toml_to_json(args);
         Ok(Plan {

@@ -15,6 +15,10 @@ impl DynModule for PingModule {
         "runsible_builtin.ping"
     }
 
+    fn check_mode_safe(&self) -> bool {
+        true
+    }
+
     fn plan(&self, _args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         Ok(Plan {
             module: self.module_name().into(),

@@ -242,6 +242,189 @@ pub fn list_rules() -> Vec<RuleInfo> {
             profile: Profile::Basic,
             severity: Severity::Info,
         },
+        // ── Schema rules L021–L030 ───────────────────────────────────────────
+        RuleInfo {
+            id: "L021".into(),
+            description: "task `register` is not a valid identifier".into(),
+            profile: Profile::Basic,
+            severity: Severity::Error,
+        },
+        RuleInfo {
+            id: "L022".into(),
+            description: "`loop_control.loop_var` collides with a reserved name".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L023".into(),
+            description: "`notify` is an empty list".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L024".into(),
+            description: "`tags` contains both `always` and `never`".into(),
+            profile: Profile::Basic,
+            severity: Severity::Error,
+        },
+        RuleInfo {
+            id: "L025".into(),
+            description: "`when` looks like a string but lacks a comparison or filter".into(),
+            profile: Profile::Moderate,
+            severity: Severity::Info,
+        },
+        RuleInfo {
+            id: "L026".into(),
+            description: "handler ID looks like a path (contains `/`)".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L027".into(),
+            description: "`[imports]` table has duplicate alias values".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L028".into(),
+            description: "`vars_files` references a non-`.toml` extension".into(),
+            profile: Profile::Basic,
+            severity: Severity::Info,
+        },
+        RuleInfo {
+            id: "L029".into(),
+            description: "`delegate_to` is not a string".into(),
+            profile: Profile::Basic,
+            severity: Severity::Error,
+        },
+        RuleInfo {
+            id: "L030".into(),
+            description: "`run_once` set on a task without `register`".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        // ── Idiom rules L031–L040 ────────────────────────────────────────────
+        RuleInfo {
+            id: "L031".into(),
+            description: "`command` task with `cmd` containing `sudo ` — use `become` instead".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L032".into(),
+            description: "`shell` used where `command` would suffice (no shell metas)".into(),
+            profile: Profile::Production,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L033".into(),
+            description: "task `name` starts with a lowercase letter".into(),
+            profile: Profile::Production,
+            severity: Severity::Info,
+        },
+        RuleInfo {
+            id: "L034".into(),
+            description: "task uses `loop` AND `with_items` (illegal in runsible)".into(),
+            profile: Profile::Min,
+            severity: Severity::Error,
+        },
+        RuleInfo {
+            id: "L035".into(),
+            description: "`vars_files` path is relative; prefer absolute".into(),
+            profile: Profile::Production,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L036".into(),
+            description: "`run_once = true` with no `delegate_to`".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L037".into(),
+            description: "`become_user` set without `become = true`".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L038".into(),
+            description: "task uses `set_fact!` (mutation form)".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L039".into(),
+            description: "`failed_when` is a list — should be a `that = […]`-style string expression".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L040".into(),
+            description: "handler with `loop` (handlers don't loop in runsible)".into(),
+            profile: Profile::Basic,
+            severity: Severity::Error,
+        },
+        // ── Safety rules L041–L050 ───────────────────────────────────────────
+        RuleInfo {
+            id: "L041".into(),
+            description: "`command` with `argv = [\"bash\", \"-c\", …]` defeats the no-shell purpose".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L042".into(),
+            description: "`copy` with mode = \"0777\" (world-writable)".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L043".into(),
+            description: "`copy` with mode = \"0666\"".into(),
+            profile: Profile::Safety,
+            severity: Severity::Info,
+        },
+        RuleInfo {
+            id: "L044".into(),
+            description: "`file` with mode = \"0777\" or \"0666\"".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L045".into(),
+            description: "`template` with mode = \"0777\"".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L046".into(),
+            description: "`get_url` without checksum".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L047".into(),
+            description: "hardcoded password-like value in args".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L048".into(),
+            description: "hardcoded API-key-shaped value".into(),
+            profile: Profile::Safety,
+            severity: Severity::Warning,
+        },
+        RuleInfo {
+            id: "L049".into(),
+            description: "`service` task on `ssh`/`sshd` without `delegate_to`".into(),
+            profile: Profile::Safety,
+            severity: Severity::Info,
+        },
+        RuleInfo {
+            id: "L050".into(),
+            description: "`wait_for` with `host = \"0.0.0.0\"`".into(),
+            profile: Profile::Basic,
+            severity: Severity::Warning,
+        },
     ]
 }
 
@@ -328,6 +511,56 @@ const TASK_META_KEYS: &[&str] = &[
 /// Shell metacharacters that indicate the `command` module is really being used
 /// as a shell.
 const SHELL_METACHARACTERS: &[char] = &['|', '>', '<', '&', ';'];
+
+// ---------------------------------------------------------------------------
+// Validation helpers used by L021 / L048
+// ---------------------------------------------------------------------------
+
+/// Standard identifier shape: starts with alpha or underscore, then alpha /
+/// digit / underscore. Used by L021 (register).
+fn is_valid_ident(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    let mut chars = s.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Heuristic for L048: does the string look like an API-key — i.e. an
+/// unbroken run of ≥ 40 alphanumeric (or `_`/`-`) characters, with a mix of
+/// letters and digits (so plain English isn't flagged).
+fn looks_like_api_key(s: &str) -> bool {
+    if s.len() < 40 {
+        return false;
+    }
+    let mut current = String::new();
+    let mut best: &str = "";
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+            current.push(c);
+            if current.len() > best.len() {
+                // Avoid borrowing from `current` while it's still mutated by
+                // recording the run length on each iteration with a snapshot.
+            }
+        } else {
+            current.clear();
+        }
+        // Track whether the current run has both letters and digits, length ≥ 40
+        if current.len() >= 40 {
+            let has_letter = current.chars().any(|c| c.is_ascii_alphabetic());
+            let has_digit = current.chars().any(|c| c.is_ascii_digit());
+            if has_letter && has_digit {
+                best = "match";
+                break;
+            }
+        }
+    }
+    !best.is_empty()
+}
 
 // ---------------------------------------------------------------------------
 // noqa parsing
@@ -523,6 +756,33 @@ pub fn lint_str(src: &str, path: &Path, cfg: &LintConfig) -> LintResult {
         }
     }
 
+    // ── L027: duplicate values in [imports] (two aliases → same FQCN) ────────
+    {
+        let mut counts: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (alias, target) in &imports {
+            counts.entry(target.as_str()).or_default().push(alias.as_str());
+        }
+        for (target, aliases) in counts {
+            if aliases.len() > 1 {
+                let line = line_of_pattern(src, target);
+                maybe_add(
+                    &mut findings,
+                    cfg,
+                    &noqa_map,
+                    Finding {
+                        rule_id: "L027".into(),
+                        description: format!(
+                            "`[imports]` has duplicate aliases for `{target}`: {aliases:?}"
+                        ),
+                        severity: Severity::Warning,
+                        line,
+                        context: Some(format!("target = \"{target}\"")),
+                    },
+                );
+            }
+        }
+    }
+
     // ── plays array ──────────────────────────────────────────────────────────
     let plays = match table.get("plays").and_then(|v| v.as_array()) {
         Some(a) => a,
@@ -654,6 +914,105 @@ pub fn lint_str(src: &str, path: &Path, cfg: &LintConfig) -> LintResult {
             }
         }
 
+        // ── L028: vars_files referencing non-.toml extension ─────────────────
+        // ── L035: vars_files path is relative ────────────────────────────────
+        if let Some(vf_arr) = play.get("vars_files").and_then(|v| v.as_array()) {
+            for v in vf_arr {
+                if let Some(p) = v.as_str() {
+                    let lower = p.to_ascii_lowercase();
+                    if !lower.ends_with(".toml") {
+                        let line = line_of_pattern(src, p);
+                        maybe_add(
+                            &mut findings,
+                            cfg,
+                            &noqa_map,
+                            Finding {
+                                rule_id: "L028".into(),
+                                description: format!(
+                                    "`vars_files` entry `{p}` does not end in `.toml`"
+                                ),
+                                severity: Severity::Info,
+                                line,
+                                context: Some(p.to_string()),
+                            },
+                        );
+                    }
+                    if !p.starts_with('/') && !p.starts_with('~') {
+                        let line = line_of_pattern(src, p);
+                        maybe_add(
+                            &mut findings,
+                            cfg,
+                            &noqa_map,
+                            Finding {
+                                rule_id: "L035".into(),
+                                description: format!(
+                                    "`vars_files` entry `{p}` is a relative path; prefer absolute"
+                                ),
+                                severity: Severity::Warning,
+                                line,
+                                context: Some(p.to_string()),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        // ── L026: handler ID looks like a path ───────────────────────────────
+        if let Some(hand_arr) = play.get("handlers").and_then(|v| v.as_array()) {
+            for h in hand_arr {
+                let h_table = match h.as_table() {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let h_id = h_table
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| h_table.get("name").and_then(|v| v.as_str()));
+                if let Some(id) = h_id {
+                    if id.contains('/') {
+                        let line = line_of_pattern(src, id);
+                        maybe_add(
+                            &mut findings,
+                            cfg,
+                            &noqa_map,
+                            Finding {
+                                rule_id: "L026".into(),
+                                description: format!(
+                                    "handler ID `{id}` contains `/` — looks like a path"
+                                ),
+                                severity: Severity::Warning,
+                                line,
+                                context: Some(id.to_string()),
+                            },
+                        );
+                    }
+                }
+
+                // ── L040: handler with `loop` ───────────────────────────────
+                if h_table.contains_key("loop") {
+                    let line = h_id
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "[[plays.handlers]]"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L040".into(),
+                            description: format!(
+                                "handler `{}` uses `loop` — handlers don't loop in runsible",
+                                h_id.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Error,
+                            line,
+                            context: Some("loop = …".into()),
+                        },
+                    );
+                }
+            }
+        }
+
         // ── L020: hosts = "all" with no limit annotation ─────────────────────
         {
             let hosts_is_all = play
@@ -755,6 +1114,330 @@ pub fn lint_str(src: &str, path: &Path, cfg: &LintConfig) -> LintResult {
                             severity: Severity::Warning,
                             line,
                             context: Some(name.chars().take(60).collect::<String>() + "…"),
+                        },
+                    );
+                }
+            }
+
+            // ── L033: task name starts with lowercase ────────────────────────
+            if let Some(name) = task_name_opt {
+                if let Some(first_char) = name.chars().find(|c| !c.is_whitespace()) {
+                    if first_char.is_alphabetic() && first_char.is_lowercase() {
+                        let line = line_of_pattern(src, name);
+                        maybe_add(
+                            &mut findings,
+                            cfg,
+                            &noqa_map,
+                            Finding {
+                                rule_id: "L033".into(),
+                                description: format!(
+                                    "task name `{}` starts with lowercase letter",
+                                    name
+                                ),
+                                severity: Severity::Info,
+                                line,
+                                context: Some(name.chars().take(60).collect::<String>()),
+                            },
+                        );
+                    }
+                }
+            }
+
+            // ── L021: invalid `register` identifier ──────────────────────────
+            if let Some(reg_var) = task.get("register").and_then(|v| v.as_str()) {
+                if !is_valid_ident(reg_var) {
+                    let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L021".into(),
+                            description: format!(
+                                "task `register = \"{reg_var}\"` is not a valid identifier"
+                            ),
+                            severity: Severity::Error,
+                            line,
+                            context: Some(format!("register = \"{reg_var}\"")),
+                        },
+                    );
+                }
+            }
+
+            // ── L022: loop_control.loop_var collides with reserved name ──────
+            if let Some(lc) = task.get("loop_control").and_then(|v| v.as_table()) {
+                if let Some(lv) = lc.get("loop_var").and_then(|v| v.as_str()) {
+                    const RESERVED: &[&str] = &["item", "i", "idx", "loop"];
+                    if RESERVED.contains(&lv) {
+                        let line = task_name_opt
+                            .and_then(|n| line_of_pattern(src, n))
+                            .or_else(|| line_of_pattern(src, "loop_control"));
+                        maybe_add(
+                            &mut findings,
+                            cfg,
+                            &noqa_map,
+                            Finding {
+                                rule_id: "L022".into(),
+                                description: format!(
+                                    "`loop_control.loop_var = \"{lv}\"` collides with a reserved name"
+                                ),
+                                severity: Severity::Warning,
+                                line,
+                                context: Some(format!("loop_var = \"{lv}\"")),
+                            },
+                        );
+                    }
+                }
+            }
+
+            // ── L023: notify is an empty list ────────────────────────────────
+            if let Some(arr) = task.get("notify").and_then(|v| v.as_array()) {
+                if arr.is_empty() {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "notify"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L023".into(),
+                            description: format!(
+                                "task \"{}\" has empty `notify` list",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Warning,
+                            line,
+                            context: Some("notify = []".into()),
+                        },
+                    );
+                }
+            }
+
+            // ── L024: tags contains both `always` and `never` ────────────────
+            if let Some(arr) = task.get("tags").and_then(|v| v.as_array()) {
+                let strs: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                if strs.contains(&"always") && strs.contains(&"never") {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "tags"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L024".into(),
+                            description: format!(
+                                "task \"{}\" has both `always` and `never` in tags",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Error,
+                            line,
+                            context: Some("tags = […always…never…]".into()),
+                        },
+                    );
+                }
+            }
+
+            // ── L025: when string lacks comparison or filter ─────────────────
+            if let Some(when_str) = task.get("when").and_then(|v| v.as_str()) {
+                let trimmed = when_str.trim();
+                let has_comparison = ["==", "!=", "<", ">", " in ", " is ", " not ", " and ", " or "]
+                    .iter()
+                    .any(|tok| trimmed.contains(tok));
+                let has_filter = trimmed.contains('|');
+                let bare_word_is_bool = matches!(trimmed, "true" | "false");
+                // A non-empty when that's just a single word without comparators
+                // is suspect (it'll evaluate as a variable lookup).
+                if !trimmed.is_empty()
+                    && !has_comparison
+                    && !has_filter
+                    && !bare_word_is_bool
+                    && !trimmed.contains('(')
+                    && !trimmed.contains(' ')
+                {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "when"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L025".into(),
+                            description: format!(
+                                "`when = \"{trimmed}\"` lacks a comparison or filter — likely a typo"
+                            ),
+                            severity: Severity::Info,
+                            line,
+                            context: Some(format!("when = \"{trimmed}\"")),
+                        },
+                    );
+                }
+            }
+
+            // ── L029: delegate_to is not a string ────────────────────────────
+            if let Some(d) = task.get("delegate_to") {
+                if d.as_str().is_none() {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "delegate_to"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L029".into(),
+                            description: format!(
+                                "task \"{}\" has non-string `delegate_to`",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Error,
+                            line,
+                            context: Some(format!("delegate_to = {d}")),
+                        },
+                    );
+                }
+            }
+
+            // ── L030: run_once true without register ─────────────────────────
+            // ── L036: run_once true without delegate_to ──────────────────────
+            let run_once_true = task
+                .get("run_once")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if run_once_true {
+                if !task.contains_key("register") {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "run_once"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L030".into(),
+                            description: format!(
+                                "task \"{}\" has `run_once = true` but no `register`",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Warning,
+                            line,
+                            context: Some("run_once = true".into()),
+                        },
+                    );
+                }
+                if !task.contains_key("delegate_to") {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "run_once"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L036".into(),
+                            description: format!(
+                                "task \"{}\" has `run_once = true` but no `delegate_to`",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Warning,
+                            line,
+                            context: Some("run_once = true".into()),
+                        },
+                    );
+                }
+            }
+
+            // ── L034: task uses both `loop` and `with_items` ────────────────
+            if task.contains_key("loop") && task.contains_key("with_items") {
+                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                maybe_add(
+                    &mut findings,
+                    cfg,
+                    &noqa_map,
+                    Finding {
+                        rule_id: "L034".into(),
+                        description: format!(
+                            "task \"{}\" uses both `loop` and `with_items` (illegal)",
+                            task_name_opt.unwrap_or("<unnamed>")
+                        ),
+                        severity: Severity::Error,
+                        line,
+                        context: Some("loop + with_items".into()),
+                    },
+                );
+            }
+
+            // ── L037: become_user without become = true ──────────────────────
+            if task.contains_key("become_user") {
+                let become_set = task
+                    .get("become")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !become_set {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "become_user"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L037".into(),
+                            description: format!(
+                                "task \"{}\" sets `become_user` without `become = true`",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Warning,
+                            line,
+                            context: Some("become_user = … (no become)".into()),
+                        },
+                    );
+                }
+            }
+
+            // ── L038: task uses set_fact! mutation form ──────────────────────
+            if task.contains_key("set_fact!") {
+                let line = task_name_opt
+                    .and_then(|n| line_of_pattern(src, n))
+                    .or_else(|| line_of_pattern(src, "set_fact!"));
+                maybe_add(
+                    &mut findings,
+                    cfg,
+                    &noqa_map,
+                    Finding {
+                        rule_id: "L038".into(),
+                        description: format!(
+                            "task \"{}\" uses `set_fact!` mutation form",
+                            task_name_opt.unwrap_or("<unnamed>")
+                        ),
+                        severity: Severity::Warning,
+                        line,
+                        context: Some("set_fact! = …".into()),
+                    },
+                );
+            }
+
+            // ── L039: failed_when is a list ──────────────────────────────────
+            if let Some(fw) = task.get("failed_when") {
+                if fw.is_array() {
+                    let line = task_name_opt
+                        .and_then(|n| line_of_pattern(src, n))
+                        .or_else(|| line_of_pattern(src, "failed_when"));
+                    maybe_add(
+                        &mut findings,
+                        cfg,
+                        &noqa_map,
+                        Finding {
+                            rule_id: "L039".into(),
+                            description: format!(
+                                "task \"{}\" has list-form `failed_when`",
+                                task_name_opt.unwrap_or("<unnamed>")
+                            ),
+                            severity: Severity::Warning,
+                            line,
+                            context: Some("failed_when = […]".into()),
                         },
                     );
                 }
@@ -942,6 +1625,336 @@ pub fn lint_str(src: &str, path: &Path, cfg: &LintConfig) -> LintResult {
                                     context: Some(cmd.chars().take(60).collect()),
                                 },
                             );
+                        }
+                    }
+                }
+
+                // ── L031: command with `cmd` containing `sudo ` ──────────────
+                // ── L032: shell where command would suffice ─────────────────
+                // ── L041: command with argv = ["bash", "-c", …] ─────────────
+                if short_name == "command" || module_name == "command"
+                    || short_name == "shell" || module_name == "shell"
+                {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        let cmd = args_table
+                            .get("cmd")
+                            .and_then(|c| c.as_str())
+                            .map(String::from);
+                        let argv: Option<Vec<String>> = args_table
+                            .get("argv")
+                            .and_then(|a| a.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(String::from))
+                                    .collect()
+                            });
+
+                        // ── L031: `sudo ` in cmd ────────────────────────────
+                        if let Some(c) = &cmd {
+                            if c.contains("sudo ") {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L031".into(),
+                                        description: format!(
+                                            "task \"{}\" uses `sudo` in `cmd` — use `become` instead",
+                                            task_name_opt.unwrap_or("<unnamed>")
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(c.chars().take(60).collect()),
+                                    },
+                                );
+                            }
+                        }
+
+                        // ── L032: shell with no metacharacters ──────────────
+                        if (short_name == "shell" || module_name == "shell")
+                            && cmd.as_ref().map_or(false, |c| {
+                                !c.chars().any(|ch| SHELL_METACHARACTERS.contains(&ch))
+                            })
+                        {
+                            let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                            maybe_add(
+                                &mut findings,
+                                cfg,
+                                &noqa_map,
+                                Finding {
+                                    rule_id: "L032".into(),
+                                    description: format!(
+                                        "task \"{}\" uses `shell` but `cmd` has no shell metas — use `command` instead",
+                                        task_name_opt.unwrap_or("<unnamed>")
+                                    ),
+                                    severity: Severity::Warning,
+                                    line,
+                                    context: cmd.map(|c| c.chars().take(60).collect()),
+                                },
+                            );
+                        }
+
+                        // ── L041: command argv = ["bash", "-c", …] ──────────
+                        if short_name == "command" || module_name == "command" {
+                            if let Some(av) = &argv {
+                                if av.len() >= 2
+                                    && (av[0] == "bash" || av[0] == "sh" || av[0] == "/bin/bash" || av[0] == "/bin/sh" || av[0] == "zsh")
+                                    && av[1] == "-c"
+                                {
+                                    let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                    maybe_add(
+                                        &mut findings,
+                                        cfg,
+                                        &noqa_map,
+                                        Finding {
+                                            rule_id: "L041".into(),
+                                            description: format!(
+                                                "task \"{}\" uses `command` with `argv = [\"{}\", \"-c\", …]` — defeats the no-shell purpose",
+                                                task_name_opt.unwrap_or("<unnamed>"),
+                                                av[0]
+                                            ),
+                                            severity: Severity::Warning,
+                                            line,
+                                            context: Some(format!("argv = [\"{}\", \"-c\", …]", av[0])),
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── L042/L043: copy with mode 0777/0666 ─────────────────────
+                if short_name == "copy" || module_name == "copy" {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if let Some(mode) = args_table.get("mode").and_then(|v| v.as_str()) {
+                            if mode == "0777" || mode == "777" {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L042".into(),
+                                        description: format!(
+                                            "task \"{}\" uses `copy` with mode `{}` (world-writable)",
+                                            task_name_opt.unwrap_or("<unnamed>"),
+                                            mode
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(format!("mode = \"{mode}\"")),
+                                    },
+                                );
+                            } else if mode == "0666" || mode == "666" {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L043".into(),
+                                        description: format!(
+                                            "task \"{}\" uses `copy` with mode `{}`",
+                                            task_name_opt.unwrap_or("<unnamed>"),
+                                            mode
+                                        ),
+                                        severity: Severity::Info,
+                                        line,
+                                        context: Some(format!("mode = \"{mode}\"")),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // ── L044: file with mode 0777/0666 ──────────────────────────
+                if short_name == "file" || module_name == "file" {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if let Some(mode) = args_table.get("mode").and_then(|v| v.as_str()) {
+                            if mode == "0777" || mode == "777" || mode == "0666" || mode == "666" {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L044".into(),
+                                        description: format!(
+                                            "task \"{}\" uses `file` with mode `{}`",
+                                            task_name_opt.unwrap_or("<unnamed>"),
+                                            mode
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(format!("mode = \"{mode}\"")),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // ── L045: template with mode 0777 ───────────────────────────
+                if short_name == "template" || module_name == "template" {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if let Some(mode) = args_table.get("mode").and_then(|v| v.as_str()) {
+                            if mode == "0777" || mode == "777" {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L045".into(),
+                                        description: format!(
+                                            "task \"{}\" uses `template` with world-writable mode `{}`",
+                                            task_name_opt.unwrap_or("<unnamed>"),
+                                            mode
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(format!("mode = \"{mode}\"")),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // ── L046: get_url without checksum ──────────────────────────
+                if short_name == "get_url" || module_name == "get_url" {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if !args_table.contains_key("checksum") {
+                            let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                            maybe_add(
+                                &mut findings,
+                                cfg,
+                                &noqa_map,
+                                Finding {
+                                    rule_id: "L046".into(),
+                                    description: format!(
+                                        "task \"{}\" downloads with `get_url` without a checksum",
+                                        task_name_opt.unwrap_or("<unnamed>")
+                                    ),
+                                    severity: Severity::Warning,
+                                    line,
+                                    context: Some("checksum missing".into()),
+                                },
+                            );
+                        }
+                    }
+                }
+
+                // ── L049: service ssh/sshd without delegate_to ──────────────
+                if short_name == "service" || module_name == "service"
+                    || short_name == "systemd_service" || module_name == "systemd_service"
+                {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if let Some(svc_name) = args_table.get("name").and_then(|v| v.as_str()) {
+                            if (svc_name == "ssh" || svc_name == "sshd")
+                                && !task.contains_key("delegate_to")
+                            {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L049".into(),
+                                        description: format!(
+                                            "task \"{}\" manages `{}` service without `delegate_to` — risk of locking yourself out",
+                                            task_name_opt.unwrap_or("<unnamed>"),
+                                            svc_name
+                                        ),
+                                        severity: Severity::Info,
+                                        line,
+                                        context: Some(format!("name = \"{svc_name}\"")),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // ── L050: wait_for with host = "0.0.0.0" ────────────────────
+                if short_name == "wait_for" || module_name == "wait_for" {
+                    if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                        if let Some(host) = args_table.get("host").and_then(|v| v.as_str()) {
+                            if host == "0.0.0.0" {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L050".into(),
+                                        description: format!(
+                                            "task \"{}\" calls `wait_for` with `host = \"0.0.0.0\"`",
+                                            task_name_opt.unwrap_or("<unnamed>")
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some("host = \"0.0.0.0\"".into()),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // ── L047/L048: hardcoded password / API key ─────────────────
+                if let Some(args_table) = task.get(alias).and_then(|v| v.as_table()) {
+                    for (k, v) in args_table {
+                        if let Some(s) = v.as_str() {
+                            // L047: secret-shaped key with non-trivial value
+                            let lower_k = k.to_ascii_lowercase();
+                            if (lower_k.contains("password")
+                                || lower_k.contains("passwd")
+                                || lower_k.contains("secret"))
+                                && s.chars().filter(|c| c.is_alphanumeric()).count() >= 8
+                                && !s.contains("{{")
+                                && !s.contains("vault(")
+                            {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L047".into(),
+                                        description: format!(
+                                            "task \"{}\" has hardcoded `{k}` — looks like a secret",
+                                            task_name_opt.unwrap_or("<unnamed>")
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(format!("{k} = \"…\"")),
+                                    },
+                                );
+                            }
+
+                            // L048: long alphanumeric run that looks like an API key
+                            if looks_like_api_key(s) && !s.contains("{{") {
+                                let line = task_name_opt.and_then(|n| line_of_pattern(src, n));
+                                maybe_add(
+                                    &mut findings,
+                                    cfg,
+                                    &noqa_map,
+                                    Finding {
+                                        rule_id: "L048".into(),
+                                        description: format!(
+                                            "task \"{}\" arg `{k}` looks like a hardcoded API key",
+                                            task_name_opt.unwrap_or("<unnamed>")
+                                        ),
+                                        severity: Severity::Warning,
+                                        line,
+                                        context: Some(format!("{k} = \"…\"")),
+                                    },
+                                );
+                            }
                         }
                     }
                 }
@@ -1361,14 +2374,22 @@ runsible_builtin.command = { cmd = "might fail" }
         let _ = result; // used
     }
 
-    // ── T9: list_rules returns >= 20 rules ────────────────────────────────────
+    // ── T9: list_rules returns >= 50 rules ────────────────────────────────────
     #[test]
-    fn list_rules_returns_20() {
+    fn list_rules_returns_50() {
         let rules = list_rules();
-        assert!(rules.len() >= 20, "Expected ≥ 20 rules, got {}", rules.len());
+        assert!(rules.len() >= 50, "Expected ≥ 50 rules, got {}", rules.len());
         // Verify all IDs are unique
         let ids: HashSet<&str> = rules.iter().map(|r| r.id.as_str()).collect();
         assert_eq!(ids.len(), rules.len(), "Rule IDs must be unique");
+        // L021–L050 must all be in the catalog.
+        for n in 21..=50 {
+            let id = format!("L{n:03}");
+            assert!(
+                ids.contains(id.as_str()),
+                "rule {id} missing from list_rules()"
+            );
+        }
     }
 
     // ── New: helper used by added tests below ───────────────────────────────
@@ -1625,6 +2646,292 @@ command = { cmd = "ls | grep foo" }
             "L019 should be suppressed by noqa; got {:?}",
             ids_after
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //   L021–L050 tests — at least 10 of the new rules
+    // ────────────────────────────────────────────────────────────────────────
+
+    // ── L021: invalid register identifier ──────────────────────────────────
+    #[test]
+    fn invalid_register_fires_l021() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "bad reg"
+register = "1bad-name"
+runsible_builtin.command = { cmd = "true" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L021"), "L021 should fire; got {:?}", ids);
+    }
+
+    // ── L022: loop_var collides with reserved name ─────────────────────────
+    #[test]
+    fn reserved_loop_var_fires_l022() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+loop = ["a", "b"]
+loop_control = { loop_var = "item" }
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L022"), "L022 should fire; got {:?}", ids);
+    }
+
+    // ── L023: empty notify list ────────────────────────────────────────────
+    #[test]
+    fn empty_notify_fires_l023() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+notify = []
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L023"), "L023 should fire; got {:?}", ids);
+    }
+
+    // ── L024: tags has both always + never ─────────────────────────────────
+    #[test]
+    fn always_and_never_fires_l024() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+tags = ["always", "never"]
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L024"), "L024 should fire; got {:?}", ids);
+    }
+
+    // ── L027: duplicate import targets ─────────────────────────────────────
+    #[test]
+    fn duplicate_imports_fires_l027() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+dbg = "runsible_builtin.debug"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L027"), "L027 should fire; got {:?}", ids);
+    }
+
+    // ── L029: delegate_to non-string ───────────────────────────────────────
+    #[test]
+    fn delegate_to_non_string_fires_l029() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+delegate_to = 42
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L029"), "L029 should fire; got {:?}", ids);
+    }
+
+    // ── L031: sudo in cmd ──────────────────────────────────────────────────
+    #[test]
+    fn sudo_in_cmd_fires_l031() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+command = "runsible_builtin.command"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+command = { cmd = "sudo systemctl restart nginx" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L031"), "L031 should fire; got {:?}", ids);
+    }
+
+    // ── L034: loop + with_items ────────────────────────────────────────────
+    #[test]
+    fn loop_and_with_items_fires_l034() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+loop = ["a"]
+with_items = ["b"]
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L034"), "L034 should fire; got {:?}", ids);
+    }
+
+    // ── L037: become_user without become ───────────────────────────────────
+    #[test]
+    fn become_user_without_become_fires_l037() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+become_user = "deploy"
+runsible_builtin.command = { cmd = "true" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L037"), "L037 should fire; got {:?}", ids);
+    }
+
+    // ── L041: command argv = ["bash", "-c", …] ─────────────────────────────
+    #[test]
+    fn command_bash_c_argv_fires_l041() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+command = "runsible_builtin.command"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+command = { argv = ["bash", "-c", "ls | wc -l"] }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L041"), "L041 should fire; got {:?}", ids);
+    }
+
+    // ── L042: copy with mode 0777 ──────────────────────────────────────────
+    #[test]
+    fn copy_world_writable_fires_l042() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+copy = "runsible_builtin.copy"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+copy = { content = "x", dest = "/tmp/x", mode = "0777" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L042"), "L042 should fire; got {:?}", ids);
+    }
+
+    // ── L046: get_url without checksum ─────────────────────────────────────
+    #[test]
+    fn get_url_no_checksum_fires_l046() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+get_url = "runsible_builtin.get_url"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+get_url = { url = "https://example.com/x", dest = "/tmp/x" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L046"), "L046 should fire; got {:?}", ids);
+    }
+
+    // ── L047: hardcoded password ───────────────────────────────────────────
+    #[test]
+    fn hardcoded_password_fires_l047() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+copy = "runsible_builtin.copy"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+copy = { content = "x", dest = "/etc/secrets", password = "supersecret123" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L047"), "L047 should fire; got {:?}", ids);
+    }
+
+    // ── L049: service ssh without delegate_to ──────────────────────────────
+    #[test]
+    fn service_ssh_fires_l049() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+service = "runsible_builtin.service"
+
+[[plays]]
+name = "P"
+hosts = "remote"
+[[plays.tasks]]
+name = "T"
+service = { name = "sshd", state = "restarted" }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L049"), "L049 should fire; got {:?}", ids);
+    }
+
+    // ── L050: wait_for 0.0.0.0 ─────────────────────────────────────────────
+    #[test]
+    fn wait_for_zero_zero_zero_zero_fires_l050() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+wait_for = "runsible_builtin.wait_for"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "T"
+wait_for = { host = "0.0.0.0", port = 80 }
+"#;
+        let ids = lint_check(src);
+        assert!(ids.iter().any(|id| id == "L050"), "L050 should fire; got {:?}", ids);
     }
 
     // ── T10: clean minimal playbook produces zero findings ────────────────────

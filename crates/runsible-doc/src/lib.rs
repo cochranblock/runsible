@@ -70,10 +70,23 @@ impl DocRegistry {
     /// Create a registry pre-loaded with all hand-authored builtin module docs.
     pub fn builtins() -> Self {
         let mut docs = IndexMap::new();
-        let debug_doc = builtin_debug();
-        let ping_doc = builtin_ping();
-        docs.insert(debug_doc.name.clone(), debug_doc);
-        docs.insert(ping_doc.name.clone(), ping_doc);
+        for d in [
+            builtin_debug(),
+            builtin_ping(),
+            builtin_set_fact(),
+            builtin_assert(),
+            builtin_command(),
+            builtin_shell(),
+            builtin_copy(),
+            builtin_file(),
+            builtin_template(),
+            builtin_package(),
+            builtin_service(),
+            builtin_systemd_service(),
+            builtin_get_url(),
+        ] {
+            docs.insert(d.name.clone(), d);
+        }
         DocRegistry { docs }
     }
 
@@ -448,6 +461,978 @@ fn builtin_ping() -> ModuleDoc {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers for the 11 added builtins below
+// ---------------------------------------------------------------------------
+
+/// Build an OptionDoc with sensible defaults. Reduces noise in the per-module
+/// doc bodies below.
+fn opt(
+    description: &str,
+    type_: &str,
+    required: bool,
+    default: Option<&str>,
+) -> OptionDoc {
+    OptionDoc {
+        description: description.to_string(),
+        type_: type_.to_string(),
+        required,
+        default: default.map(String::from),
+        choices: vec![],
+        aliases: vec![],
+    }
+}
+
+/// Build an OptionDoc with explicit choices.
+fn opt_choices(
+    description: &str,
+    type_: &str,
+    required: bool,
+    default: Option<&str>,
+    choices: &[&str],
+) -> OptionDoc {
+    OptionDoc {
+        description: description.to_string(),
+        type_: type_.to_string(),
+        required,
+        default: default.map(String::from),
+        choices: choices.iter().map(|s| s.to_string()).collect(),
+        aliases: vec![],
+    }
+}
+
+fn ret(description: &str, type_: &str, sample: &str) -> ReturnDoc {
+    ReturnDoc {
+        description: description.to_string(),
+        type_: type_.to_string(),
+        sample: sample.to_string(),
+    }
+}
+
+fn example(name: &str, description: &str, toml: &str) -> Example {
+    Example {
+        name: name.to_string(),
+        description: description.to_string(),
+        toml: toml.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.set_fact
+// ---------------------------------------------------------------------------
+
+fn builtin_set_fact() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "<key>".to_string(),
+        opt(
+            "Arbitrary k=v pairs. Each key/value is set as a host fact \
+             (in the host's variable namespace) and persists for the rest \
+             of the play.",
+            "any",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert(
+        "ansible_facts".to_string(),
+        ret(
+            "Map of the facts that were set on the host.",
+            "table",
+            "{ pkg = \"nginx\" }",
+        ),
+    );
+
+    ModuleDoc {
+        name: "runsible_builtin.set_fact".to_string(),
+        short_description: "Set host-scoped facts (variables) at runtime".to_string(),
+        description: "set_fact stores arbitrary k=v pairs in the host's fact \
+            namespace. Once set, the fact is visible to subsequent tasks running \
+            on the same host as a top-level variable.\n\n\
+            Unlike `vars` declared on the play, set_fact runs at task time, \
+            so the values can be templated from prior task results, host facts, \
+            or registered variables. Facts persist for the remainder of the \
+            play; they are NOT written to disk."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Set two facts",
+                "Two facts assigned in one task.",
+                "[[plays.tasks]]\nname = \"set facts\"\nset_fact = { pkg = \"nginx\", port = 80 }\n",
+            ),
+            example(
+                "Compute a fact from a previous register",
+                "Reference a registered variable in the value.",
+                "[[plays.tasks]]\nname = \"hostname\"\ncommand = { cmd = \"hostname\" }\nregister = \"hn\"\n\n[[plays.tasks]]\nname = \"stash hostname\"\nset_fact = { my_host = \"{{ hn.stdout }}\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Facts set by set_fact are scoped to the current host for the remainder of the play.".to_string(),
+            "set_fact does not modify host state — it only mutates the controller's variable map.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.debug".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.assert
+// ---------------------------------------------------------------------------
+
+fn builtin_assert() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "that".to_string(),
+        opt(
+            "List of Jinja boolean expressions. Each expression is evaluated \
+             in the current variable context; if any evaluates to false the \
+             task fails.",
+            "list of str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "fail_msg".to_string(),
+        opt(
+            "Custom message printed when an expression is false.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "success_msg".to_string(),
+        opt(
+            "Custom message printed when every expression is true.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert(
+        "msg".to_string(),
+        ret("Result message (success_msg or fail_msg).", "str", "All assertions passed"),
+    );
+
+    ModuleDoc {
+        name: "runsible_builtin.assert".to_string(),
+        short_description: "Assert that one or more Jinja boolean expressions hold".to_string(),
+        description: "The assert module evaluates a list of boolean expressions \
+            in the current variable context. The task succeeds only when every \
+            expression evaluates true; if any expression is false the task fails \
+            and `fail_msg` (or a default) is recorded.\n\n\
+            assert is the idiomatic way to express invariants in a play — \
+            use it to gate later tasks behind preconditions, validate \
+            registered output, or sanity-check fact values."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Single condition",
+                "Fail the play if the package facts are missing.",
+                "[[plays.tasks]]\nname = \"need facts\"\nassert = { that = [\"ansible_facts is defined\"] }\n",
+            ),
+            example(
+                "Multiple conditions with custom messages",
+                "All expressions must hold.",
+                "[[plays.tasks]]\nname = \"sanity check\"\nassert = { that = [\"port > 0\", \"port < 65536\"], fail_msg = \"port out of range\", success_msg = \"port ok\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "assert never modifies host state.".to_string(),
+            "Use assert (rather than the `fail` module) when the failure depends on a runtime expression.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.fail".to_string(),
+            "runsible_builtin.debug".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.command
+// ---------------------------------------------------------------------------
+
+fn builtin_command() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "argv".to_string(),
+        opt(
+            "Argument vector. Preferred form — passes each element directly \
+             to execve() with no shell interpretation.",
+            "list of str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "cmd".to_string(),
+        opt(
+            "Command line to execute. The first whitespace-separated token \
+             is the binary; subsequent tokens are positional arguments. \
+             Mutually exclusive with `argv`.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "chdir".to_string(),
+        opt(
+            "Change to this directory before executing the command.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "creates".to_string(),
+        opt(
+            "If this path already exists the task is skipped (creates idempotency).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "removes".to_string(),
+        opt(
+            "If this path does NOT exist the task is skipped.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("rc".to_string(), ret("Exit status code.", "int", "0"));
+    return_values.insert("stdout".to_string(), ret("Captured standard output.", "str", "hello"));
+    return_values.insert("stderr".to_string(), ret("Captured standard error.", "str", ""));
+
+    ModuleDoc {
+        name: "runsible_builtin.command".to_string(),
+        short_description: "Execute a binary directly without a shell".to_string(),
+        description: "command runs an external program by invoking its binary \
+            with `execve()` directly. No shell is involved, so shell metacharacters \
+            (pipes, redirection, globs, variable expansion) are NOT interpreted — \
+            they are passed through as literal characters.\n\n\
+            Prefer `argv` over `cmd`: `argv = [\"git\", \"clone\", repo]` always splits \
+            arguments correctly, even when values contain whitespace. `cmd` splits on \
+            whitespace, which is fragile.\n\n\
+            command is NOT idempotent on its own — use `creates`/`removes` to make it so."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Run hostname (cmd form)",
+                "Capture the result with register.",
+                "[[plays.tasks]]\nname = \"get hostname\"\ncommand = { cmd = \"hostname\" }\nregister = \"hn\"\n",
+            ),
+            example(
+                "argv form",
+                "Robust against whitespace in arguments.",
+                "[[plays.tasks]]\nname = \"git clone\"\ncommand = { argv = [\"git\", \"clone\", \"https://example.com/repo.git\", \"/tmp/repo\"] }\n",
+            ),
+            example(
+                "Idempotent via creates",
+                "Skip if the marker file already exists.",
+                "[[plays.tasks]]\nname = \"once-only init\"\ncommand = { cmd = \"./init.sh\", creates = \"/var/lib/myapp/initialized\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "command is NOT idempotent. Use `creates` / `removes` for first-run-only behavior.".to_string(),
+            "Shell metacharacters in `cmd` are passed through literally — use `shell` if you actually want a shell.".to_string(),
+            "Prefer `argv` to avoid argument-splitting bugs.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.shell".to_string(),
+            "runsible_builtin.script".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.shell
+// ---------------------------------------------------------------------------
+
+fn builtin_shell() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "cmd".to_string(),
+        opt(
+            "Shell command line. Passed to `executable -c <cmd>` so all \
+             shell features (pipes, redirection, globs, $vars) are available.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "executable".to_string(),
+        opt(
+            "Shell binary to invoke.",
+            "str",
+            false,
+            Some("/bin/sh"),
+        ),
+    );
+    options.insert(
+        "chdir".to_string(),
+        opt(
+            "Change to this directory before executing the command.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "creates".to_string(),
+        opt(
+            "If this path already exists the task is skipped.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "removes".to_string(),
+        opt(
+            "If this path does NOT exist the task is skipped.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("rc".to_string(), ret("Exit status code.", "int", "0"));
+    return_values.insert("stdout".to_string(), ret("Captured standard output.", "str", "line1\nline2\n"));
+    return_values.insert("stderr".to_string(), ret("Captured standard error.", "str", ""));
+
+    ModuleDoc {
+        name: "runsible_builtin.shell".to_string(),
+        short_description: "Execute a command through a shell".to_string(),
+        description: "shell runs a command line via `<executable> -c <cmd>`. \
+            Unlike `command`, the cmd is interpreted by a shell, so pipes, \
+            redirection, globs, and variable expansion all work.\n\n\
+            **Use shell only when you actually need shell features.** \
+            For straightforward binary invocations prefer `command` — it avoids \
+            quoting pitfalls and is harder to misuse with untrusted input.\n\n\
+            Untrusted Jinja-rendered input must NOT be embedded in `cmd` without \
+            careful escaping; doing so creates a shell-injection vulnerability."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Pipeline",
+                "Use shell when you genuinely need pipes.",
+                "[[plays.tasks]]\nname = \"top user processes\"\nshell = { cmd = \"ps -ef | sort -k2 | head -5\" }\n",
+            ),
+            example(
+                "Bash-specific",
+                "Pick a different executable.",
+                "[[plays.tasks]]\nname = \"bashism\"\nshell = { cmd = \"set -o pipefail; cat foo | grep bar\", executable = \"/bin/bash\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "WARNING: shell expands its argument through a shell. Untrusted Jinja-rendered values can lead to command injection.".to_string(),
+            "Prefer `command` for non-shell tasks (linter rule L018).".to_string(),
+            "shell is NOT idempotent. Use `creates` / `removes` for first-run-only behavior.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.command".to_string(),
+            "runsible_builtin.script".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.copy
+// ---------------------------------------------------------------------------
+
+fn builtin_copy() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "src".to_string(),
+        opt(
+            "Local source path on the controller. Mutually exclusive with `content`.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "content".to_string(),
+        opt(
+            "Inline content to write to dest. Mutually exclusive with `src`.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Destination path on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "mode".to_string(),
+        opt(
+            "Octal-style file mode (as a string, e.g. \"0644\").",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("dest".to_string(), ret("Destination path.", "str", "/etc/foo.conf"));
+    return_values.insert("changed".to_string(), ret("Whether the file was created or modified.", "bool", "true"));
+    return_values.insert("checksum".to_string(), ret("SHA-256 checksum of the destination after copy.", "str", "ab12…"));
+
+    ModuleDoc {
+        name: "runsible_builtin.copy".to_string(),
+        short_description: "Copy a file or inline content to a destination".to_string(),
+        description: "copy writes a file on the managed node. Either `src` (a path \
+            on the controller) or `content` (an inline string) must be supplied — \
+            never both. The destination is written atomically: copy first writes to \
+            a temporary file in the same directory, then renames into place, so \
+            partial writes never appear at `dest`.\n\n\
+            copy is idempotent: if the destination already has the same content \
+            (and matching mode if specified) the task reports `ok` rather than \
+            `changed`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Copy a local file",
+                "Standard file deployment.",
+                "[[plays.tasks]]\nname = \"deploy nginx.conf\"\ncopy = { src = \"files/nginx.conf\", dest = \"/etc/nginx/nginx.conf\", mode = \"0644\" }\n",
+            ),
+            example(
+                "Inline content",
+                "Skip the file system on the controller side.",
+                "[[plays.tasks]]\nname = \"write banner\"\ncopy = { content = \"hello\\n\", dest = \"/etc/motd\", mode = \"0644\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "copy writes atomically via tempfile + rename.".to_string(),
+            "Provide mode as an octal-formatted string (\"0644\"), not an integer.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.template".to_string(),
+            "runsible_builtin.file".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.file
+// ---------------------------------------------------------------------------
+
+fn builtin_file() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt(
+            "Filesystem path to manage.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Desired state of the path.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent", "directory", "touch"],
+        ),
+    );
+    options.insert(
+        "mode".to_string(),
+        opt(
+            "Octal-style permission bits (e.g. \"0755\").",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("path".to_string(), ret("The managed path.", "str", "/var/lib/app"));
+    return_values.insert("state".to_string(), ret("The state after the action.", "str", "directory"));
+    return_values.insert("changed".to_string(), ret("Whether the path was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.file".to_string(),
+        short_description: "Manage filesystem entries (files, directories, symlinks)".to_string(),
+        description: "file ensures the named path exists in the requested state. \
+            Available states are `present` (regular file exists), `absent` (path \
+            removed if it exists), `directory` (mkdir -p semantics), and \
+            `touch` (create-or-update mtime).\n\n\
+            file is idempotent: if the path is already in the requested state the \
+            task reports `ok`. The optional `mode` field reconciles permissions on \
+            every run."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Ensure a directory exists",
+                "Create-if-missing with explicit mode.",
+                "[[plays.tasks]]\nname = \"app data dir\"\nfile = { path = \"/var/lib/app\", state = \"directory\", mode = \"0755\" }\n",
+            ),
+            example(
+                "Remove a file",
+                "Idempotent removal.",
+                "[[plays.tasks]]\nname = \"remove tempfile\"\nfile = { path = \"/tmp/scratch\", state = \"absent\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Use `copy` or `template` to write file content; `file` only manages metadata.".to_string(),
+            "World-writable modes (\"0777\", \"0666\") are flagged by lint rules L044.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.copy".to_string(),
+            "runsible_builtin.template".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.template
+// ---------------------------------------------------------------------------
+
+fn builtin_template() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "src".to_string(),
+        opt(
+            "Path to the Jinja template file on the controller.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Destination path on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "mode".to_string(),
+        opt(
+            "Octal-style file mode (e.g. \"0644\").",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("dest".to_string(), ret("Destination path written to.", "str", "/etc/app.conf"));
+    return_values.insert("changed".to_string(), ret("Whether the rendered output differed from the prior file.", "bool", "true"));
+    return_values.insert("checksum".to_string(), ret("SHA-256 of the rendered output.", "str", "ab12…"));
+
+    ModuleDoc {
+        name: "runsible_builtin.template".to_string(),
+        short_description: "Render a Jinja template to a destination file".to_string(),
+        description: "template reads `src` from the controller, renders it through \
+            the runsible Jinja engine using the current host's variable context, \
+            and writes the result to `dest` on the managed node.\n\n\
+            Like `copy`, template is idempotent: the rendered bytes are compared \
+            with the existing file and the task is `ok` when they match. Writes \
+            are atomic via tempfile + rename."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Render a config file",
+                "Per-host configuration via variables.",
+                "[[plays.tasks]]\nname = \"app config\"\ntemplate = { src = \"templates/app.conf.j2\", dest = \"/etc/app.conf\", mode = \"0644\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "The template language is Jinja2-compatible (subset).".to_string(),
+            "World-writable modes are flagged by lint rule L045.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.copy".to_string(),
+            "runsible_builtin.file".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.package
+// ---------------------------------------------------------------------------
+
+fn builtin_package() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt(
+            "Package name, or list of package names.",
+            "str or list of str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Desired state of the package.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent", "latest"],
+        ),
+    );
+    options.insert(
+        "manager".to_string(),
+        opt_choices(
+            "Package manager to use. `auto` detects from the host facts.",
+            "str",
+            false,
+            Some("auto"),
+            &["apt", "dnf", "yum", "auto"],
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("changed".to_string(), ret("Whether the package set was modified.", "bool", "true"));
+    return_values.insert("manager".to_string(), ret("Package manager actually used.", "str", "apt"));
+
+    ModuleDoc {
+        name: "runsible_builtin.package".to_string(),
+        short_description: "Install, upgrade, or remove OS packages".to_string(),
+        description: "package is a generic frontend for the host's native package \
+            manager. With `manager = \"auto\"` (default) the appropriate backend \
+            is chosen from host facts; otherwise an explicit backend is used.\n\n\
+            `name` may be a single package or a list — passing a list is preferred \
+            because most backends batch installs in a single transaction. \
+            The supported states are `present`, `absent`, and `latest`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Install one package",
+                "Single-package install.",
+                "[[plays.tasks]]\nname = \"install nginx\"\npackage = { name = \"nginx\", state = \"present\" }\n",
+            ),
+            example(
+                "Install multiple",
+                "Batched in a single transaction.",
+                "[[plays.tasks]]\nname = \"webserver stack\"\npackage = { name = [\"nginx\", \"certbot\", \"curl\"], state = \"present\" }\n",
+            ),
+            example(
+                "Force a specific backend",
+                "Explicitly use apt (overriding auto-detect).",
+                "[[plays.tasks]]\nname = \"latest jq via apt\"\npackage = { name = \"jq\", state = \"latest\", manager = \"apt\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "`state = \"latest\"` forces an upgrade — be explicit about whether the underlying transaction may pull in updates.".to_string(),
+            "`manager = \"auto\"` requires the `setup` module to have populated host facts at least once.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.service".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.service
+// ---------------------------------------------------------------------------
+
+fn builtin_service() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt(
+            "Service name (e.g. \"nginx\").",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Desired state to drive the service to.",
+            "str",
+            false,
+            None,
+            &["started", "stopped", "restarted", "reloaded"],
+        ),
+    );
+    options.insert(
+        "enabled".to_string(),
+        opt(
+            "Whether the service should be enabled at boot.",
+            "bool",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Service name.", "str", "nginx"));
+    return_values.insert("state".to_string(), ret("State after the action.", "str", "started"));
+    return_values.insert("changed".to_string(), ret("Whether the service was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.service".to_string(),
+        short_description: "Manage init-system services on the managed node".to_string(),
+        description: "service drives the host's init system to ensure the named \
+            service is in the requested state and (optionally) enabled at boot. \
+            The exact init backend (systemd, OpenRC, etc.) is detected from host \
+            facts; if you need systemd-specific knobs use `systemd_service` \
+            instead.\n\n\
+            `state = \"restarted\"` is unconditional — useful in handlers that \
+            should run on config changes. `state = \"reloaded\"` sends SIGHUP \
+            (or the equivalent) when the backend supports it."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Start and enable nginx",
+                "Most common case.",
+                "[[plays.tasks]]\nname = \"nginx up\"\nservice = { name = \"nginx\", state = \"started\", enabled = true }\n",
+            ),
+            example(
+                "Restart in a handler",
+                "Handlers fire after notifying tasks change config.",
+                "[[plays.handlers]]\nname = \"restart nginx\"\nservice = { name = \"nginx\", state = \"restarted\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "If neither `state` nor `enabled` is set the task is a no-op.".to_string(),
+            "Restarting `ssh`/`sshd` from the same host you're connected over can lock you out — see lint rule L049.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.systemd_service".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.systemd_service
+// ---------------------------------------------------------------------------
+
+fn builtin_systemd_service() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt(
+            "Unit name (\"nginx\", \"nginx.service\", \"my.timer\").",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Desired state to drive the unit to.",
+            "str",
+            false,
+            None,
+            &["started", "stopped", "restarted", "reloaded"],
+        ),
+    );
+    options.insert(
+        "enabled".to_string(),
+        opt(
+            "Whether the unit should be enabled at boot.",
+            "bool",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "daemon_reload".to_string(),
+        opt(
+            "Run `systemctl daemon-reload` before applying. Set after \
+             dropping a new unit file on disk.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+    options.insert(
+        "scope".to_string(),
+        opt_choices(
+            "Whether to operate on system or per-user units.",
+            "str",
+            false,
+            Some("system"),
+            &["system", "user"],
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Unit name.", "str", "nginx.service"));
+    return_values.insert("state".to_string(), ret("State after the action.", "str", "started"));
+    return_values.insert("changed".to_string(), ret("Whether the unit was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.systemd_service".to_string(),
+        short_description: "Manage systemd units (with daemon_reload + user/system scope)".to_string(),
+        description: "systemd_service is the systemd-specific superset of `service`. \
+            In addition to `state`/`enabled` it understands `daemon_reload` (for \
+            picking up freshly-dropped unit files) and `scope` (system vs. \
+            per-user units).\n\n\
+            Use this module when you need explicit control over those features. \
+            For portable plays that should also run on non-systemd hosts, prefer \
+            the generic `service` module."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Drop a unit and start it",
+                "Reload daemon then start the new unit.",
+                "[[plays.tasks]]\nname = \"install unit\"\ncopy = { src = \"files/myapp.service\", dest = \"/etc/systemd/system/myapp.service\", mode = \"0644\" }\n\n[[plays.tasks]]\nname = \"start myapp\"\nsystemd_service = { name = \"myapp\", state = \"started\", enabled = true, daemon_reload = true }\n",
+            ),
+            example(
+                "User scope",
+                "Manage a unit in the calling user's session.",
+                "[[plays.tasks]]\nname = \"user timer\"\nsystemd_service = { name = \"backup.timer\", state = \"started\", enabled = true, scope = \"user\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Requires systemd on the managed node.".to_string(),
+            "Set `daemon_reload = true` after writing a new unit file or systemd will keep using the old definition.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.service".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.get_url
+// ---------------------------------------------------------------------------
+
+fn builtin_get_url() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "url".to_string(),
+        opt("URL to fetch.", "str", true, None),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Destination path on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "mode".to_string(),
+        opt(
+            "Octal-style file mode for the destination file.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "checksum".to_string(),
+        opt(
+            "Expected checksum of the downloaded file, prefixed with the algorithm \
+             (e.g. \"sha256:ab12…\"). The download is verified against this and \
+             rejected on mismatch.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("dest".to_string(), ret("Destination path.", "str", "/tmp/foo.tgz"));
+    return_values.insert("url".to_string(), ret("URL fetched.", "str", "https://example.com/foo.tgz"));
+    return_values.insert("changed".to_string(), ret("Whether the file was downloaded (false on cache hit).", "bool", "true"));
+    return_values.insert("checksum_dest".to_string(), ret("SHA-256 of the destination after download.", "str", "ab12…"));
+
+    ModuleDoc {
+        name: "runsible_builtin.get_url".to_string(),
+        short_description: "Download content from a URL to a destination file".to_string(),
+        description: "get_url fetches `url` to `dest`. If `dest` already exists \
+            and a `checksum` is supplied that matches the existing file, the \
+            download is skipped and the task reports `ok`.\n\n\
+            **Always supply `checksum` when possible.** Without it the only \
+            integrity guarantee is whatever the transport (HTTPS) provides; \
+            with it the file is verified end-to-end before being moved into \
+            place. Lint rule L046 flags missing checksums in Safety profile."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Download with checksum",
+                "Pinned by content hash — the recommended form.",
+                "[[plays.tasks]]\nname = \"download installer\"\nget_url = { url = \"https://example.com/installer.sh\", dest = \"/tmp/installer.sh\", mode = \"0755\", checksum = \"sha256:abc123…\" }\n",
+            ),
+            example(
+                "Plain download",
+                "Discouraged without a checksum.",
+                "[[plays.tasks]]\nname = \"fetch tarball\"\nget_url = { url = \"https://example.com/data.tgz\", dest = \"/tmp/data.tgz\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Always pin downloads to a checksum when possible (`sha256:…`).".to_string(),
+            "Atomic write: get_url downloads to a tempfile in dest's directory and renames into place.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.copy".to_string(),
+            "runsible_builtin.uri".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TRIPLE SIMS gate
 // ---------------------------------------------------------------------------
 
@@ -755,6 +1740,38 @@ mod tests {
         assert_eq!(doc.return_values.len(), back.return_values.len());
         assert_eq!(doc.notes, back.notes);
         assert_eq!(doc.see_also, back.see_also);
+    }
+
+    // ── New: every runsible_builtin module has a registered doc ────────────
+    #[test]
+    fn all_runsible_builtins_have_docs() {
+        let reg = DocRegistry::builtins();
+        for name in [
+            "debug",
+            "ping",
+            "set_fact",
+            "assert",
+            "command",
+            "shell",
+            "copy",
+            "file",
+            "template",
+            "package",
+            "service",
+            "systemd_service",
+            "get_url",
+        ] {
+            let fq = format!("runsible_builtin.{name}");
+            assert!(
+                reg.get(&fq).is_some(),
+                "missing doc for {name} (fq={fq})"
+            );
+        }
+        assert!(
+            reg.list().len() >= 13,
+            "registry should hold ≥ 13 builtin docs; got {}",
+            reg.list().len()
+        );
     }
 
     // ── New: empty options + empty examples renders without panic ──────────

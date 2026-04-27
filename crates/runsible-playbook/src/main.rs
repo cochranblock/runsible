@@ -31,18 +31,25 @@ struct Cli {
     #[arg(short = 'e', long = "extra-vars")]
     extra_vars: Vec<String>,
 
-    /// Dry-run: plan only, do not apply. (M1)
-    #[arg(long = "check")]
+    /// Dry-run: run plan() but skip apply() for mutating modules. Safe modules
+    /// (`debug`, `ping`, `set_fact`, `assert`) still execute so vars/asserts
+    /// work as expected.
+    #[arg(short = 'C', long = "check")]
     check_mode: bool,
+
+    /// Show before/after diff for mutating modules. Often combined with `--check`.
+    #[arg(short = 'D', long = "diff")]
+    diff_mode: bool,
+
+    /// Maximum number of hosts to run in parallel within each play. Defaults
+    /// to 1 (sequential) so event ordering stays deterministic; bump higher
+    /// to fan out across hosts.
+    #[arg(short = 'f', long = "forks", default_value = "1")]
+    forks: usize,
 }
 
 fn main() {
     let cli = Cli::parse();
-
-    if cli.check_mode {
-        eprintln!("note: --check mode is not yet implemented (M1)");
-        process::exit(2);
-    }
 
     let src = match std::fs::read_to_string(&cli.playbook) {
         Ok(s) => s,
@@ -81,6 +88,9 @@ fn main() {
         skip_tags: cli.skip_tags,
         extra_vars,
         role_search_paths: None,
+        check_mode: cli.check_mode,
+        diff_mode: cli.diff_mode,
+        forks: cli.forks.max(1),
     };
 
     match run_with(&src, &inv_spec, &cli.playbook, opts) {

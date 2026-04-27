@@ -14,6 +14,16 @@ pub trait DynModule: Send + Sync {
     fn module_name(&self) -> &str;
     fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan>;
     fn apply(&self, plan: &Plan, ctx: &ExecutionContext) -> Result<Outcome>;
+    /// Whether this module is safe to run in `--check` mode (no host-state
+    /// mutation). Default `false` — engine will skip apply() in check_mode for
+    /// modules that don't override this.
+    ///
+    /// Override to `true` for read-only/synthetic modules: `debug`, `ping`,
+    /// `set_fact`, `assert`. These mutate engine-side state (vars/notifications)
+    /// but not the target host, so they're safe to run.
+    fn check_mode_safe(&self) -> bool {
+        false
+    }
 }
 
 pub struct ModuleCatalog {
@@ -28,6 +38,7 @@ impl ModuleCatalog {
         c.register(Box::new(crate::modules::debug::DebugModule));
         c.register(Box::new(crate::modules::ping::PingModule));
         c.register(Box::new(crate::modules::set_fact::SetFactModule));
+        c.register(Box::new(crate::modules::setup::SetupModule));
         c.register(Box::new(crate::modules::assert_mod::AssertModule));
         c.register(Box::new(crate::modules::command::CommandModule));
         c.register(Box::new(crate::modules::shell::ShellModule));
@@ -38,6 +49,21 @@ impl ModuleCatalog {
         c.register(Box::new(crate::modules::service::ServiceModule));
         c.register(Box::new(crate::modules::systemd_service::SystemdServiceModule));
         c.register(Box::new(crate::modules::get_url::GetUrlModule));
+        c.register(Box::new(crate::modules::lineinfile::LineInFileModule));
+        c.register(Box::new(crate::modules::blockinfile::BlockInFileModule));
+        c.register(Box::new(crate::modules::replace::ReplaceModule));
+        c.register(Box::new(crate::modules::stat::StatModule));
+        c.register(Box::new(crate::modules::find::FindModule));
+        c.register(Box::new(crate::modules::fail::FailModule));
+        c.register(Box::new(crate::modules::pause::PauseModule));
+        c.register(Box::new(crate::modules::wait_for::WaitForModule));
+        c.register(Box::new(crate::modules::uri::UriModule));
+        c.register(Box::new(crate::modules::archive::ArchiveModule));
+        c.register(Box::new(crate::modules::unarchive::UnarchiveModule));
+        c.register(Box::new(crate::modules::user::UserModule));
+        c.register(Box::new(crate::modules::group::GroupModule));
+        c.register(Box::new(crate::modules::cron::CronModule));
+        c.register(Box::new(crate::modules::hostname::HostnameModule));
         c
     }
 

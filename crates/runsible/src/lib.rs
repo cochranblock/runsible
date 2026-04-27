@@ -195,7 +195,7 @@ mod tests {
         let host = Host { name: "localhost".into(), vars: Vars::new() };
         let vars = Vars::new();
         let conn = runsible_connection::LocalSync;
-        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false, diff_mode: false };
         let module = PingModule;
         let args = toml::Value::Table(toml::map::Map::new());
 

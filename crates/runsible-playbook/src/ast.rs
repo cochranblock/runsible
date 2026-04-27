@@ -55,6 +55,31 @@ pub struct RawPlay {
     /// `tags = [...]` applied to every task in the play.
     #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Whether to auto-prepend a `setup` task before pre_tasks/role tasks/tasks/post_tasks.
+    ///
+    /// NOTE: runsible defaults this to `false` (per poor-decisions §12) — the
+    /// opposite of Ansible's default `true`. If you actually want facts you must
+    /// either set `gather_facts = true` on the play or call `setup` explicitly
+    /// from a task.
+    #[serde(default = "default_gather_facts")]
+    pub gather_facts: bool,
+
+    /// `vars_files = ["path1.toml", ...]` — flat TOML files merged at "play
+    /// vars" precedence (between host vars and inline play.vars). Missing
+    /// files are silently skipped at M1 (M2: emit a warning event).
+    #[serde(default)]
+    pub vars_files: Vec<String>,
+
+    /// `[plays.module_defaults."<fq_module>"]` — per-module default args
+    /// merged into every matching task call before templating. Task-level args
+    /// always win on key collision.
+    #[serde(default)]
+    pub module_defaults: IndexMap<String, toml::Value>,
+}
+
+fn default_gather_facts() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,10 +137,23 @@ pub struct Task {
     pub rescue: Vec<toml::Value>,
     /// `always = [[...]]` — runs after block (and rescue if applicable).
     pub always: Vec<toml::Value>,
+    /// `delegate_to = "<host>"` — when set, the engine substitutes this name
+    /// into the ExecutionContext's host so the outcome reports the delegate.
+    /// (At M1 the connection used is still the engine's local one — true
+    /// remote delegation lands in M2.)
+    pub delegate_to: Option<String>,
+    /// `run_once = true` — execute on the first matching host only and skip
+    /// subsequent hosts in the per-host loop.
+    pub run_once: bool,
 }
 
 /// Sentinel `module_name` value indicating the task is a block, not a module call.
 pub const BLOCK_SENTINEL: &str = "_block_";
+
+/// Sentinel `module_name` value indicating the task is an `include_tasks` /
+/// `import_tasks` directive, not a module call. The task's `args` is a string
+/// holding the include path.
+pub const INCLUDE_SENTINEL: &str = "_include_tasks_";
 
 /// One `[[plays.roles]]` entry.
 #[derive(Debug, Clone, Deserialize)]
@@ -170,4 +208,6 @@ pub(crate) const TASK_META_KEYS: &[&str] = &[
     "id",
     "module_defaults",
     "debugger",
+    "include_tasks",
+    "import_tasks",
 ];

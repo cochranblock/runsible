@@ -16,7 +16,7 @@ name = "runsible-playbook"
 path = "src/main.rs"
 
 [features]
-tests = ["dep:exopack", "dep:tokio"]
+tests = ["dep:exopack"]
 
 [[bin]]
 name = "runsible-playbook-test"
@@ -29,11 +29,19 @@ runsible-inventory = { workspace = true }
 runsible-connection = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 toml = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 indexmap = { workspace = true }
 minijinja = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+globset = { workspace = true }
+semver = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
 exopack = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
