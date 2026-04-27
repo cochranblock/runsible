@@ -44,6 +44,10 @@ pub struct RawPlay {
     #[serde(default)]
     pub handlers: IndexMap<String, toml::Value>,
 
+    /// `[[plays.roles]]` — array of role references.
+    #[serde(default)]
+    pub roles: Vec<RoleRef>,
+
     /// `[plays.vars]`
     #[serde(default)]
     pub vars: IndexMap<String, toml::Value>,
@@ -112,6 +116,24 @@ pub struct Task {
 
 /// Sentinel `module_name` value indicating the task is a block, not a module call.
 pub const BLOCK_SENTINEL: &str = "_block_";
+
+/// One `[[plays.roles]]` entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoleRef {
+    pub name: String,
+    /// Defaults to "main".
+    #[serde(default = "default_entry_point")]
+    pub entry_point: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// `[plays.roles.vars]` — overrides role defaults.
+    #[serde(default)]
+    pub vars: IndexMap<String, toml::Value>,
+}
+
+fn default_entry_point() -> String {
+    "main".to_string()
+}
 
 // Task-level keys that are not a module call.
 pub(crate) const TASK_META_KEYS: &[&str] = &[

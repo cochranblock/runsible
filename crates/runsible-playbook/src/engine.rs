@@ -32,6 +32,9 @@ pub struct RunOptions {
     pub tags: Vec<String>,
     pub skip_tags: Vec<String>,
     pub extra_vars: Vars,
+    /// Override the default role search paths (`packages/`, `roles/`, `~/.runsible/cache/`).
+    /// Used by tests to avoid chdir races; CLI consumers can leave this None.
+    pub role_search_paths: Option<Vec<std::path::PathBuf>>,
 }
 
 /// Parse and run a playbook file against the given inventory string.
@@ -85,22 +88,66 @@ pub fn run_with(
             },
         );
 
-        let task_sequence: Vec<&toml::Value> = raw_play
-            .pre_tasks
-            .iter()
-            .chain(raw_play.tasks.iter())
-            .chain(raw_play.post_tasks.iter())
-            .collect();
+        // Load roles (find on disk, parse manifests + tasks + handlers + vars).
+        let role_search: Vec<std::path::PathBuf> = opts
+            .role_search_paths
+            .clone()
+            .unwrap_or_else(crate::roles::default_search_paths);
+        let mut role_defaults: Vars = Vars::new();
+        let mut role_vars: Vars = Vars::new();
+        let mut role_param_vars: Vars = Vars::new();
+        let mut role_task_blocks: Vec<(Vec<String>, Vars, Vec<toml::Value>)> = Vec::new(); // (extra_tags, role_params, tasks)
+        let mut all_handlers_raw: IndexMap<String, toml::Value> = raw_play.handlers.clone();
 
-        // Resolve all tasks once (parse-time validation).
-        let tasks: Vec<Task> = task_sequence
-            .iter()
-            .map(|raw| resolve_task(raw, &pb.imports))
-            .collect::<Result<_>>()?;
+        for role_ref in &raw_play.roles {
+            let loaded = crate::roles::load_role(
+                &role_ref.name,
+                &role_ref.entry_point,
+                &role_search,
+            )?;
+            for (k, v) in &loaded.defaults {
+                role_defaults.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &loaded.vars {
+                role_vars.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &role_ref.vars {
+                role_param_vars.insert(k.clone(), v.clone());
+            }
+            for (id, body) in &loaded.handlers {
+                all_handlers_raw.insert(id.clone(), body.clone());
+            }
+            let role_params: Vars = role_ref.vars.clone().into_iter().collect();
+            role_task_blocks.push((role_ref.tags.clone(), role_params, loaded.tasks.clone()));
+        }
 
-        // Resolve all handlers once.
-        let handlers: IndexMap<String, Task> = raw_play
-            .handlers
+        // Resolve all tasks (pre_tasks, role tasks, tasks, post_tasks) — parse-time validation.
+        let mut tasks: Vec<Task> = Vec::new();
+
+        for raw in &raw_play.pre_tasks {
+            tasks.push(resolve_task(raw, &pb.imports)?);
+        }
+        // Role tasks: each gets the role's tags appended (so --tags applies).
+        for (role_tags, _params, role_tasks) in &role_task_blocks {
+            for raw in role_tasks {
+                let mut t = resolve_task(raw, &pb.imports)?;
+                for rt in role_tags {
+                    if !t.tags.contains(rt) {
+                        t.tags.push(rt.clone());
+                    }
+                }
+                tasks.push(t);
+            }
+        }
+        for raw in &raw_play.tasks {
+            tasks.push(resolve_task(raw, &pb.imports)?);
+        }
+        for raw in &raw_play.post_tasks {
+            tasks.push(resolve_task(raw, &pb.imports)?);
+        }
+
+        // Resolve all handlers once (play handlers + role handlers).
+        let handlers: IndexMap<String, Task> = all_handlers_raw
             .iter()
             .map(|(id, raw)| resolve_handler(id, raw, &pb.imports).map(|t| (id.clone(), t)))
             .collect::<Result<_>>()?;
@@ -121,9 +168,19 @@ pub fn run_with(
         let mut play_changed_handlers: IndexMap<String, IndexSet<String>> = IndexMap::new();
 
         for host in &play_hosts {
-            // Per-host vars: host inline vars (lvl 2) → play vars (lvl 3) → extra_vars (lvl 4).
-            let mut vars: Vars = host.vars.clone();
+            // Per-host vars precedence (low → high):
+            //   role defaults < host vars < play vars < role vars < role params < extra_vars
+            let mut vars: Vars = role_defaults.clone();
+            for (k, v) in &host.vars {
+                vars.insert(k.clone(), v.clone());
+            }
             for (k, v) in &raw_play.vars {
+                vars.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &role_vars {
+                vars.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &role_param_vars {
                 vars.insert(k.clone(), v.clone());
             }
             for (k, v) in &opts.extra_vars {

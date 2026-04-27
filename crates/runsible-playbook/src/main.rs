@@ -80,6 +80,7 @@ fn main() {
         tags: cli.tags,
         skip_tags: cli.skip_tags,
         extra_vars,
+        role_search_paths: None,
     };
 
     match run_with(&src, &inv_spec, &cli.playbook, opts) {

@@ -5,6 +5,7 @@ pub mod errors;
 pub mod modules;
 pub mod output;
 pub mod parse;
+pub mod roles;
 pub mod templating;
 
 pub use engine::{run, RunResult};
@@ -603,6 +604,113 @@ debug = { msg = "always" }
         let r = run(src, "localhost,", "test").unwrap();
         assert_eq!(r.failed, 0);
         assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn role_tasks_run_in_play() {
+        let tmp = std::env::temp_dir().join(format!("rsl-role-itest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pkg_dir = tmp.join("packages");
+        let role_root = pkg_dir.join("greet");
+        std::fs::create_dir_all(role_root.join("tasks")).unwrap();
+        std::fs::create_dir_all(role_root.join("defaults")).unwrap();
+        std::fs::write(
+            role_root.join("tasks/main.toml"),
+            r#"
+[[tasks]]
+name = "say hi"
+debug = { msg = "hello {{ greeting_target }}" }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            role_root.join("defaults/main.toml"),
+            r#"greeting_target = "world""#,
+        )
+        .unwrap();
+
+        let pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Use role"
+hosts = "localhost"
+[[plays.roles]]
+name = "greet"
+"#;
+        let opts = engine::RunOptions {
+            role_search_paths: Some(vec![pkg_dir.clone()]),
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 1, "role's single task ran ok");
+    }
+
+    #[test]
+    fn role_params_override_defaults() {
+        let tmp = std::env::temp_dir().join(format!("rsl-role-params-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let pkg_dir = tmp.join("packages");
+        let role_root = pkg_dir.join("greet");
+        std::fs::create_dir_all(role_root.join("tasks")).unwrap();
+        std::fs::create_dir_all(role_root.join("defaults")).unwrap();
+        std::fs::write(
+            role_root.join("tasks/main.toml"),
+            r#"
+[[tasks]]
+name = "assert override"
+assert = { that = ["greeting_target == 'override'"] }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            role_root.join("defaults/main.toml"),
+            r#"greeting_target = "default""#,
+        )
+        .unwrap();
+
+        let pb = r#"
+[imports]
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "Override"
+hosts = "localhost"
+[[plays.roles]]
+name = "greet"
+[plays.roles.vars]
+greeting_target = "override"
+"#;
+        let opts = engine::RunOptions {
+            role_search_paths: Some(vec![pkg_dir.clone()]),
+            ..Default::default()
+        };
+        let r = engine::run_with(pb, "localhost,", "test", opts).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert_eq!(r.failed, 0, "role param should override default");
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn missing_role_errors_at_parse() {
+        let pb = r#"
+[[plays]]
+name = "Bad"
+hosts = "localhost"
+[[plays.roles]]
+name = "totally_does_not_exist_role_12345"
+"#;
+        // Use an empty search path so the role is genuinely unfindable
+        // regardless of whatever exists in the cwd.
+        let opts = engine::RunOptions {
+            role_search_paths: Some(vec![]),
+            ..Default::default()
+        };
+        let err = engine::run_with(pb, "localhost,", "test", opts).unwrap_err();
+        assert!(matches!(err, PlaybookError::Parse(_)));
     }
 
     #[test]

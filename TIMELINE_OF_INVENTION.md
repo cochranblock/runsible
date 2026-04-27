@@ -10,6 +10,14 @@
 
 ## Entries
 
+### 2026-04-27 — runsible-playbook M1: roles
+
+**What:** Added role/package include support. New `roles.rs` module loads a role from `packages/<name>/`, `roles/<name>/`, or `~/.runsible/cache/<name>/` (first match wins) — reading `tasks/<entry>.toml` (default entry "main"), `handlers/<entry>.toml`, `defaults/<entry>.toml`, `vars/<entry>.toml`. AST gained `[[plays.roles]]` (name + entry_point + tags + vars). Engine load sequence: pre_tasks → role tasks (in declaration order) → tasks → post_tasks. Per-host vars precedence is now: role defaults < host vars < play vars < role vars < role params (`[plays.roles.vars]`) < extra_vars. Role handlers merge into the play's handler map. Role tags propagate to every task in the role. Added `role_search_paths` override to `RunOptions` to keep tests free of `set_current_dir` races. Workspace: 148/148 tests green (was 142).
+**Why:** Roles are how playbooks scale beyond a single file. Without role support, every reusable bundle (nginx setup, postgres setup, hardening rule set) must be inlined or copy-pasted. The runsible-galaxy package format is already shaped around this directory layout, so engine support unblocks the install→run loop.
+**Commit:** pending
+**AI Role:** AI implemented the roles loader, wired engine integration, fixed the chdir-race in tests by adding `role_search_paths` to RunOptions, and verified workspace test parallelism stays correct.
+**Proof:** `~/.cargo/bin/cargo test --workspace` — 148 tests pass. Three role integration tests cover: role's tasks running in the play's task sequence, role params (`[plays.roles.vars]`) overriding role defaults, and missing-role producing a Parse error before any task runs.
+
 ### 2026-04-26 — runsible-playbook M1 expansion: 5 new modules + loop/until/block
 
 **What:** Added 5 builtin modules (template, package, service, systemd_service, get_url) bringing the total to 13. Refactored the engine's per-task body into `execute_one_task` so block/rescue/always could recursively reuse it. Added engine support for `loop = [...]`/`loop_control { loop_var, label }` (one task execution per item, item bound in vars), `until = { expr }` + `retries` + `delay_seconds` (re-run with sleep until expression true), and `block`/`rescue`/`always` (block children fail-fast → rescue runs on failure → always always runs). Workspace: 142/142 tests green.
