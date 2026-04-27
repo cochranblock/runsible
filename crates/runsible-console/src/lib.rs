@@ -55,6 +55,29 @@ pub fn f30() -> i32 {
         return 7;
     }
 
+    // ── Stage 6: ConsoleCompleter pulls module names from the catalog and
+    // completes a partial prefix. ──────────────────────────────────────────
+    let completer = repl::ConsoleCompleter::from_builtins();
+    let (start, candidates) = completer.complete_word("deb", 3);
+    if start != 0 {
+        return 8;
+    }
+    if !candidates.iter().any(|c| c == "debug") {
+        return 9;
+    }
+
+    // Empty prefix returns at least the catalog's known short alias for ping.
+    let (_, all) = completer.complete_word("", 0);
+    if !all.iter().any(|c| c == "ping" || c == "runsible_builtin.ping") {
+        return 10;
+    }
+
+    // Unknown prefix returns no candidates.
+    let (_, none) = completer.complete_word("xyz_no_such_prefix_zzz", 22);
+    if !none.is_empty() {
+        return 11;
+    }
+
     0
 }
 

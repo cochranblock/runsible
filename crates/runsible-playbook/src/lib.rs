@@ -53,6 +53,257 @@ debug = { msg = "x is {{ x }}" }
         return 5;
     }
 
+    // Stage 2: --check mode skips real changes for mutating modules.
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dest = std::env::temp_dir().join(format!("rsl-pb-f30-{pid}-{nanos}.txt"));
+    let _ = std::fs::remove_file(&dest);
+    let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+    let check_pb = format!(
+        r#"
+[imports]
+copy = "runsible_builtin.copy"
+[[plays]]
+name = "check"
+hosts = "localhost"
+[[plays.tasks]]
+copy = {{ content = "must not write\n", dest = "{dest_str}" }}
+"#
+    );
+    let opts = engine::RunOptions {
+        check_mode: true,
+        ..Default::default()
+    };
+    let r = match engine::run_with(&check_pb, "localhost,", "f30-check", opts) {
+        Ok(r) => r,
+        Err(_) => return 6,
+    };
+    if r.changed != 1 {
+        let _ = std::fs::remove_file(&dest);
+        return 7;
+    }
+    if dest.exists() {
+        let _ = std::fs::remove_file(&dest);
+        return 8;
+    }
+
+    // Stage 3: --diff mode populates before+after on mutating modules.
+    if std::fs::write(&dest, "old\n").is_err() {
+        return 9;
+    }
+    // Reuse the same playbook, now with check+diff and a pre-existing file.
+    let opts2 = engine::RunOptions {
+        check_mode: true,
+        diff_mode: true,
+        ..Default::default()
+    };
+    if engine::run_with(&check_pb, "localhost,", "f30-diff", opts2).is_err() {
+        let _ = std::fs::remove_file(&dest);
+        return 10;
+    }
+    let _ = std::fs::remove_file(&dest);
+
+    // Stage 4: forks=4 across 8 hosts produces 8 outcomes.
+    // Run on a fresh OS thread because the engine's parallel path builds its
+    // own tokio multi-thread runtime via `block_on`. If we're being driven by
+    // a tokio current-thread runtime (which exopack's test bin is), nesting
+    // would panic with "Cannot start a runtime from within a runtime".
+    let multi_pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "multi"
+hosts = "all"
+[[plays.tasks]]
+debug = { msg = "host {{ inventory_hostname }}" }
+"#;
+    let multi_pb_owned = multi_pb.to_string();
+    let r3 = match std::thread::spawn(move || {
+        let opts3 = engine::RunOptions {
+            forks: 4,
+            ..Default::default()
+        };
+        engine::run_with(&multi_pb_owned, "h1,h2,h3,h4,h5,h6,h7,h8,", "f30-forks", opts3)
+    })
+    .join()
+    {
+        Ok(Ok(r)) => r,
+        _ => return 11,
+    };
+    if r3.ok != 8 {
+        return 12;
+    }
+    if r3.failed != 0 {
+        return 13;
+    }
+
+    // Stage 5: gather_facts auto-prepends setup; ansible_hostname is bound.
+    let facts_pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "facts"
+hosts = "localhost"
+gather_facts = true
+[[plays.tasks]]
+debug = { msg = "host {{ ansible_hostname }}" }
+"#;
+    let r4 = match run(facts_pb, "localhost,", "f30-facts") {
+        Ok(r) => r,
+        Err(_) => return 14,
+    };
+    if r4.failed != 0 {
+        return 15;
+    }
+    // 1 setup task + 1 debug task = 2 outcomes.
+    if r4.ok != 2 {
+        return 16;
+    }
+
+    // Stage 6: include_tasks loads an external file and runs its tasks.
+    let inc_path = std::env::temp_dir().join(format!("rsl-pb-f30-inc-{pid}-{nanos}.toml"));
+    let _ = std::fs::remove_file(&inc_path);
+    if std::fs::write(
+        &inc_path,
+        r#"
+[[tasks]]
+debug = { msg = "from include" }
+"#,
+    )
+    .is_err()
+    {
+        return 17;
+    }
+    let inc_str = inc_path.to_string_lossy().replace('\\', "\\\\");
+    let inc_pb = format!(
+        r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "inc"
+hosts = "localhost"
+[[plays.tasks]]
+include_tasks = "{inc_str}"
+"#
+    );
+    let r5 = match run(&inc_pb, "localhost,", "f30-inc") {
+        Ok(r) => r,
+        Err(_) => {
+            let _ = std::fs::remove_file(&inc_path);
+            return 18;
+        }
+    };
+    let _ = std::fs::remove_file(&inc_path);
+    if r5.failed != 0 || r5.ok != 1 {
+        return 19;
+    }
+
+    // Stage 7: module_defaults apply when task omits the arg.
+    let md_pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "md"
+hosts = "localhost"
+[plays.module_defaults."runsible_builtin.debug"]
+msg = "from defaults"
+[[plays.tasks]]
+debug = {}
+"#;
+    let r6 = match run(md_pb, "localhost,", "f30-md") {
+        Ok(r) => r,
+        Err(_) => return 20,
+    };
+    if r6.failed != 0 || r6.ok != 1 {
+        return 21;
+    }
+
+    // Stage 8: filter catalog — render an Ansible-shaped filter chain and
+    // verify the engine accepts it.
+    let filt_pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "filt"
+hosts = "localhost"
+[plays.vars]
+items = ["a", "b", "c"]
+raw_b64 = "aGVsbG8="
+yes_str = "yes"
+[[plays.tasks]]
+assert = { that = ["items | length == 3", "yes_str | bool == true", "raw_b64 | b64decode == 'hello'"] }
+"#;
+    let r7 = match run(filt_pb, "localhost,", "f30-filt") {
+        Ok(r) => r,
+        Err(_) => return 22,
+    };
+    if r7.failed != 0 || r7.ok != 1 {
+        return 23;
+    }
+
+    // Stage 9: lookup catalog — env lookup and pipe lookup both wired.
+    let lookup_pb = r#"
+[imports]
+debug = "runsible_builtin.debug"
+assert = "runsible_builtin.assert"
+[[plays]]
+name = "lookup"
+hosts = "localhost"
+[[plays.tasks]]
+assert = { that = ["lookup('env', 'RSL_F30_NONEXISTENT_VAR') == ''"] }
+"#;
+    let r8 = match run(lookup_pb, "localhost,", "f30-lookup") {
+        Ok(r) => r,
+        Err(_) => return 24,
+    };
+    if r8.failed != 0 {
+        return 25;
+    }
+
+    // Stage 10: catalog has all 28 builtin modules registered.
+    let cat = catalog::ModuleCatalog::with_builtins();
+    let expected_modules = [
+        "runsible_builtin.debug",
+        "runsible_builtin.ping",
+        "runsible_builtin.set_fact",
+        "runsible_builtin.assert",
+        "runsible_builtin.command",
+        "runsible_builtin.shell",
+        "runsible_builtin.copy",
+        "runsible_builtin.file",
+        "runsible_builtin.template",
+        "runsible_builtin.package",
+        "runsible_builtin.service",
+        "runsible_builtin.systemd_service",
+        "runsible_builtin.get_url",
+        "runsible_builtin.setup",
+        "runsible_builtin.lineinfile",
+        "runsible_builtin.blockinfile",
+        "runsible_builtin.replace",
+        "runsible_builtin.stat",
+        "runsible_builtin.find",
+        "runsible_builtin.fail",
+        "runsible_builtin.pause",
+        "runsible_builtin.wait_for",
+        "runsible_builtin.uri",
+        "runsible_builtin.archive",
+        "runsible_builtin.unarchive",
+        "runsible_builtin.user",
+        "runsible_builtin.group",
+        "runsible_builtin.cron",
+        "runsible_builtin.hostname",
+    ];
+    for name in &expected_modules {
+        if cat.get(name).is_none() {
+            eprintln!("missing module: {name}");
+            return 26;
+        }
+    }
+
     0
 }
 

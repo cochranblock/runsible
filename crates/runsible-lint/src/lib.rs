@@ -2209,6 +2209,96 @@ debug = { msg = "hello" }
         return 4;
     }
 
+    // ── Production-profile rule coverage: lock in a sampling of L021–L050 ───
+    let prod_cfg = LintConfig {
+        profile: Profile::Production,
+        skip_rules: vec![],
+        extra_rules: vec![],
+        severity_overrides: HashMap::new(),
+    };
+
+    // L017: ignore_errors = true.
+    let l017_src = r#"
+schema = "runsible.playbook.v1"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "boom"
+ignore_errors = true
+debug = { msg = "x" }
+"#;
+    let l017 = lint_str(l017_src, Path::new("l017.toml"), &prod_cfg);
+    if !l017.findings.iter().any(|f| f.rule_id == "L017") {
+        return 5;
+    }
+
+    // L042: copy with mode 0777 should fire.
+    let l042_src = r#"
+schema = "runsible.playbook.v1"
+[imports]
+copy = "runsible_builtin.copy"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "drop"
+copy = { content = "x", dest = "/tmp/x", mode = "0777" }
+"#;
+    let l042 = lint_str(l042_src, Path::new("l042.toml"), &prod_cfg);
+    if !l042.findings.iter().any(|f| f.rule_id == "L042") {
+        return 6;
+    }
+
+    // L046: get_url without checksum should fire under safety/production.
+    let l046_src = r#"
+schema = "runsible.playbook.v1"
+[imports]
+get_url = "runsible_builtin.get_url"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "fetch"
+get_url = { url = "https://x", dest = "/tmp/d" }
+"#;
+    let l046 = lint_str(l046_src, Path::new("l046.toml"), &prod_cfg);
+    if !l046.findings.iter().any(|f| f.rule_id == "L046") {
+        return 7;
+    }
+
+    // ── noqa suppression must hide a finding ─────────────────────────────────
+    let noqa_src = r#"
+schema = "runsible.playbook.v1"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "boom"  # runsible: noqa L017
+ignore_errors = true
+debug = { msg = "x" }
+"#;
+    let noqa = lint_str(noqa_src, Path::new("noqa.toml"), &prod_cfg);
+    if noqa.findings.iter().any(|f| f.rule_id == "L017") {
+        return 8;
+    }
+
+    // ── list_rules() must include all 50 rules ──────────────────────────────
+    let rules = list_rules();
+    if rules.len() < 50 {
+        return 9;
+    }
+    let ids: HashSet<&str> = rules.iter().map(|r| r.id.as_str()).collect();
+    for id in &["L001", "L010", "L020", "L030", "L040", "L050"] {
+        if !ids.contains(id) {
+            return 10;
+        }
+    }
+
     0
 }
 

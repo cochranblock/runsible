@@ -58,6 +58,32 @@ impl ConsoleCompleter {
 
         ConsoleCompleter { modules }
     }
+
+    /// `Context`-free helper exposing the underlying completion logic so
+    /// callers (e.g. f30 / unit tests) can drive completion without having
+    /// to build a rustyline `Context`. Returns (`word_start_offset`, candidates_as_strings).
+    pub fn complete_word(&self, line: &str, pos: usize) -> (usize, Vec<String>) {
+        let prefix = &line[..pos.min(line.len())];
+        let word_start = prefix
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let word = &prefix[word_start..];
+
+        // Match the trait impl: only complete the first token.
+        let typed_only_first_token = !prefix[..word_start].chars().any(|c| !c.is_whitespace());
+        if !typed_only_first_token {
+            return (pos, Vec::new());
+        }
+
+        let candidates: Vec<String> = self
+            .modules
+            .iter()
+            .filter(|m| m.starts_with(word))
+            .cloned()
+            .collect();
+        (word_start, candidates)
+    }
 }
 
 impl Completer for ConsoleCompleter {

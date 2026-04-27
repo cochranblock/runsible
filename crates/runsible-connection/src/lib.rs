@@ -113,6 +113,107 @@ pub fn f30() -> i32 {
         return 10;
     }
 
+    // Stage 6: SSH CA cert support. Mint a real Ed25519 CA + user keypair via
+    // ssh-keygen, sign a JIT cert, parse it back, verify principal + key_id.
+    // Skip cleanly if ssh-keygen is unavailable (e.g. minimal containers).
+    if !crate::ssh_cert::ssh_keygen_available() {
+        eprintln!("skip: ssh-keygen unavailable");
+        return 0;
+    }
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("rsl-conn-f30-cert-{pid}-{nanos}"));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return 11;
+    }
+    let ca_key = dir.join("ca");
+    let user_key = dir.join("user_ed25519");
+
+    let ca_gen = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C", "rsl-f30-ca", "-f"])
+        .arg(&ca_key)
+        .output();
+    let Ok(ca_gen) = ca_gen else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 12;
+    };
+    if !ca_gen.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 13;
+    }
+
+    let user_gen = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C", "rsl-f30-user", "-f"])
+        .arg(&user_key)
+        .output();
+    let Ok(user_gen) = user_gen else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 14;
+    };
+    if !user_gen.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 15;
+    }
+
+    let user_pub = std::path::PathBuf::from(format!("{}.pub", user_key.display()));
+    let cfg = crate::ssh_cert::CaConfig::new(&ca_key, "deploy")
+        .with_validity_seconds(60)
+        .with_key_id("rsl-f30-cert");
+
+    let cert_path = match crate::ssh_cert::mint_jit_cert(&user_pub, &cfg) {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return 16;
+        }
+    };
+    if !cert_path.exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 17;
+    }
+    if cert_path.file_name().and_then(|s| s.to_str()) != Some("user_ed25519-cert.pub") {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 18;
+    }
+
+    // Parse the cert back via `ssh-keygen -L -f` and verify principal + key_id.
+    let parsed = std::process::Command::new("ssh-keygen")
+        .args(["-L", "-f"])
+        .arg(&cert_path)
+        .output();
+    let Ok(parsed) = parsed else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 19;
+    };
+    if !parsed.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 20;
+    }
+    let s = String::from_utf8_lossy(&parsed.stdout).into_owned();
+    if !s.contains("deploy") || !s.contains("rsl-f30-cert") {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 21;
+    }
+
+    // Stage 7: derive_cert_path on a `.pub` and on a bare key both produce
+    // `<stem>-cert.pub`.
+    if crate::ssh_cert::derive_cert_path(std::path::Path::new("/k/id.pub"))
+        != std::path::PathBuf::from("/k/id-cert.pub")
+    {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 22;
+    }
+    if crate::ssh_cert::derive_cert_path(std::path::Path::new("/k/id"))
+        != std::path::PathBuf::from("/k/id-cert.pub")
+    {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 23;
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
     0
 }
 

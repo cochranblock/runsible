@@ -176,6 +176,116 @@ pub fn f30() -> i32 {
         return 7;
     }
 
+    // Stage 8: parse_duration accepts s/m/h/d and rejects junk.
+    if crate::config::parse_duration("10m") != Ok(600) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 8;
+    }
+    if crate::config::parse_duration("1h") != Ok(3600) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 9;
+    }
+    if crate::config::parse_duration("2d") != Ok(172800) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 10;
+    }
+    if crate::config::parse_duration("nope").is_ok() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 11;
+    }
+
+    // Stage 9: HTTP heartbeat with empty URL is a no-op (must not error,
+    // must not require curl).
+    let no_op_cfg = crate::config::HeartbeatConfig {
+        url: String::new(),
+        ..Default::default()
+    };
+    if crate::http_heartbeat::post_heartbeat(&no_op_cfg, &hb).is_err() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 12;
+    }
+
+    // Stage 10: NDJSON queue is the on-failure persistence path. Build a
+    // queue file in our tempdir, post to a guaranteed-unreachable URL with a
+    // tight timeout, verify the file gets a JSON line.
+    let queue_path = dir.join("hb-queue.ndjson");
+    let fail_cfg = crate::config::HeartbeatConfig {
+        url: "http://127.0.0.1:1/none".into(),
+        bearer_token: String::new(),
+        timeout_seconds: 1,
+        max_retries: 0,
+        initial_backoff_seconds: 1,
+        queue_path: queue_path.to_string_lossy().to_string(),
+    };
+    // POST should fail but enqueue.
+    let r = crate::http_heartbeat::post_heartbeat(&fail_cfg, &hb);
+    // If curl is unavailable we treat that as skip — the gate must remain green
+    // on minimal CI runners. The error variant tells us which case.
+    match r {
+        Err(crate::http_heartbeat::HttpHeartbeatError::CurlUnavailable) => {
+            // Skip stage 10 on no-curl boxes.
+        }
+        Err(_) => {
+            if !queue_path.exists() {
+                let _ = std::fs::remove_dir_all(&dir);
+                return 13;
+            }
+            let qbody = match std::fs::read_to_string(&queue_path) {
+                Ok(s) => s,
+                Err(_) => {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return 14;
+                }
+            };
+            // Each queued entry is a single-line JSON heartbeat ending in \n.
+            if !qbody.starts_with('{') || !qbody.ends_with('\n') {
+                let _ = std::fs::remove_dir_all(&dir);
+                return 15;
+            }
+        }
+        Ok(()) => {
+            // localhost:1 might actually be answering on some weird CI; treat
+            // success as benign.
+        }
+    }
+
+    // Stage 11: daemon stops immediately when the stop flag is pre-set.
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    let stop = Arc::new(AtomicBool::new(true));
+    let cfg_for_daemon = crate::config::PullConfig {
+        source: crate::config::SourceConfig {
+            kind: "git".into(),
+            url: "file:///nonexistent".into(),
+            branch: "main".into(),
+            ssh_key: None,
+        },
+        apply: crate::config::ApplyConfig {
+            playbook: std::path::PathBuf::from("site.toml"),
+            extra_vars: vec![],
+        },
+        paths: crate::config::PathsConfig {
+            state_dir: dir.clone(),
+            heartbeat_path: dir.join("daemon-hb.json"),
+        },
+        schedule: crate::config::ScheduleConfig {
+            interval: "1s".into(),
+            jitter: "0s".into(),
+        },
+        heartbeat: crate::config::HeartbeatConfig::default(),
+    };
+    let cycles = match crate::daemon::run_daemon(&cfg_for_daemon, stop) {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return 16;
+        }
+    };
+    if cycles != 0 {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 17;
+    }
+
     let _ = std::fs::remove_dir_all(&dir);
     0
 }

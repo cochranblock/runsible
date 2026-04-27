@@ -1472,6 +1472,60 @@ pub fn f30() -> i32 {
         return 7;
     }
 
+    // All 13 originally-documented builtins must be in the registry. Note:
+    // 15 newer modules (lineinfile, blockinfile, replace, stat, find, fail,
+    // pause, wait_for, uri, archive, unarchive, user, group, cron, hostname)
+    // are still undocumented per the gap analysis; this gate locks in the
+    // first cohort and will fail if any of them regress.
+    let documented = [
+        "runsible_builtin.debug",
+        "runsible_builtin.ping",
+        "runsible_builtin.set_fact",
+        "runsible_builtin.assert",
+        "runsible_builtin.command",
+        "runsible_builtin.shell",
+        "runsible_builtin.copy",
+        "runsible_builtin.file",
+        "runsible_builtin.template",
+        "runsible_builtin.package",
+        "runsible_builtin.service",
+        "runsible_builtin.systemd_service",
+        "runsible_builtin.get_url",
+    ];
+    for name in &documented {
+        let doc = match reg.get(name) {
+            Some(d) => d,
+            None => return 8,
+        };
+        // Every doc must render without panic and produce non-empty output.
+        if render_text(doc).is_empty() {
+            return 9;
+        }
+        if render_markdown(doc).is_empty() {
+            return 10;
+        }
+        if render_snippet(doc).is_empty() {
+            return 11;
+        }
+    }
+
+    // list() must return at least the documented set, in stable order.
+    let listed = reg.list();
+    if listed.len() < documented.len() {
+        return 12;
+    }
+    let listed2 = reg.list();
+    let names1: Vec<&str> = listed.iter().map(|d| d.name.as_str()).collect();
+    let names2: Vec<&str> = listed2.iter().map(|d| d.name.as_str()).collect();
+    if names1 != names2 {
+        return 13;
+    }
+
+    // Lookup of an unknown module returns None.
+    if reg.get("runsible_builtin.totally_unknown_module_xyz").is_some() {
+        return 14;
+    }
+
     0
 }
 
