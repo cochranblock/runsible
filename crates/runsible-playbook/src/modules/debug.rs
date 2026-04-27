@@ -4,7 +4,8 @@
 //! setting `will_change: false` in `plan()` but still calling `apply()` —
 //! at M0 the engine always calls apply() regardless of plan.is_empty().
 
-use runsible_core::types::{Host, Outcome, OutcomeStatus, Plan};
+use runsible_core::traits::ExecutionContext;
+use runsible_core::types::{Outcome, OutcomeStatus, Plan};
 
 use crate::catalog::DynModule;
 use crate::errors::Result;
@@ -16,17 +17,17 @@ impl DynModule for DebugModule {
         "runsible_builtin.debug"
     }
 
-    fn plan(&self, args: &toml::Value, host: &Host) -> Result<Plan> {
+    fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let msg = extract_msg(args);
         Ok(Plan {
             module: self.module_name().into(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             diff: serde_json::json!({ "msg": msg }),
             will_change: false,
         })
     }
 
-    fn apply(&self, plan: &Plan, host: &Host) -> Result<Outcome> {
+    fn apply(&self, plan: &Plan, ctx: &ExecutionContext) -> Result<Outcome> {
         let msg = plan
             .diff
             .get("msg")
@@ -35,7 +36,7 @@ impl DynModule for DebugModule {
             .to_string();
         Ok(Outcome {
             module: plan.module.clone(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             status: OutcomeStatus::Ok,
             elapsed_ms: 0,
             returns: serde_json::json!({ "msg": msg }),

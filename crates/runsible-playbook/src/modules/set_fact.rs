@@ -11,7 +11,8 @@
 //! after `apply()` returns. Expression evaluation and templating happen
 //! engine-side where the templater lives.
 
-use runsible_core::types::{Host, Outcome, OutcomeStatus, Plan};
+use runsible_core::traits::ExecutionContext;
+use runsible_core::types::{Outcome, OutcomeStatus, Plan};
 
 use crate::catalog::DynModule;
 use crate::errors::Result;
@@ -23,21 +24,20 @@ impl DynModule for SetFactModule {
         "runsible_builtin.set_fact"
     }
 
-    fn plan(&self, args: &toml::Value, host: &Host) -> Result<Plan> {
-        // Clone the entire args table as JSON for the engine to merge later.
+    fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let diff = toml_to_json(args);
         Ok(Plan {
             module: self.module_name().into(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             diff,
             will_change: true,
         })
     }
 
-    fn apply(&self, plan: &Plan, host: &Host) -> Result<Outcome> {
+    fn apply(&self, plan: &Plan, ctx: &ExecutionContext) -> Result<Outcome> {
         Ok(Outcome {
             module: plan.module.clone(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             status: OutcomeStatus::Ok,
             elapsed_ms: 0,
             returns: plan.diff.clone(),

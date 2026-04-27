@@ -12,7 +12,8 @@
 //! engine will later call the templater to evaluate each expression and
 //! downgrade the outcome to `Failed` if any expression is false.
 
-use runsible_core::types::{Host, Outcome, OutcomeStatus, Plan};
+use runsible_core::traits::ExecutionContext;
+use runsible_core::types::{Outcome, OutcomeStatus, Plan};
 
 use crate::catalog::DynModule;
 use crate::errors::Result;
@@ -24,7 +25,7 @@ impl DynModule for AssertModule {
         "runsible_builtin.assert"
     }
 
-    fn plan(&self, args: &toml::Value, host: &Host) -> Result<Plan> {
+    fn plan(&self, args: &toml::Value, ctx: &ExecutionContext) -> Result<Plan> {
         let that = toml_to_json(args.get("that").unwrap_or(&toml::Value::Array(vec![])));
         let fail_msg = args
             .get("fail_msg")
@@ -39,7 +40,7 @@ impl DynModule for AssertModule {
 
         Ok(Plan {
             module: self.module_name().into(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             diff: serde_json::json!({
                 "that": that,
                 "fail_msg": fail_msg,
@@ -49,13 +50,10 @@ impl DynModule for AssertModule {
         })
     }
 
-    fn apply(&self, plan: &Plan, host: &Host) -> Result<Outcome> {
-        // Engine-side evaluation comes later. For now we always report Ok and
-        // hand the diff back as returns; the engine will replace this with a
-        // templated evaluation pass.
+    fn apply(&self, plan: &Plan, ctx: &ExecutionContext) -> Result<Outcome> {
         Ok(Outcome {
             module: plan.module.clone(),
-            host: host.name.clone(),
+            host: ctx.host.name.clone(),
             status: OutcomeStatus::Ok,
             elapsed_ms: 0,
             returns: plan.diff.clone(),

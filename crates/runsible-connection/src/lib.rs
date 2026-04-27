@@ -5,11 +5,13 @@
 
 pub mod errors;
 pub mod local;
+pub mod local_sync;
 pub mod spec;
 pub mod ssh_system;
 
 pub use errors::{ConnectionError, Result};
 pub use local::LocalConnection;
+pub use local_sync::LocalSync;
 pub use spec::{ConnectionKind, ConnectionSpec};
 pub use ssh_system::SshSystemConnection;
 

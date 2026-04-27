@@ -156,15 +156,19 @@ mod tests {
     // 1. ping module — plan and apply
     #[test]
     fn ping_module_plan_apply() {
+        use runsible_core::traits::ExecutionContext;
         let host = Host { name: "localhost".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
         let module = PingModule;
         let args = toml::Value::Table(toml::map::Map::new());
 
-        let plan = DynModule::plan(&module, &args, &host).unwrap();
+        let plan = DynModule::plan(&module, &args, &ctx).unwrap();
         assert!(!plan.will_change);
         assert_eq!(plan.diff["ping"], "pong");
 
-        let outcome = DynModule::apply(&module, &plan, &host).unwrap();
+        let outcome = DynModule::apply(&module, &plan, &ctx).unwrap();
         assert_eq!(outcome.returns["ping"], "pong");
         assert_eq!(outcome.status, runsible_core::types::OutcomeStatus::Ok);
     }

@@ -10,8 +10,10 @@
 use std::time::Instant;
 
 use indexmap::{IndexMap, IndexSet};
+use runsible_connection::LocalSync;
 use runsible_core::{
     event::Event,
+    traits::ExecutionContext,
     types::{Host, OutcomeStatus, Vars},
 };
 
@@ -47,6 +49,7 @@ pub fn run_with(
     let mode = OutputMode::detect();
     let catalog = ModuleCatalog::with_builtins();
     let templater = Templater::new();
+    let connection = LocalSync;
 
     let hosts = resolve_inventory(inventory_spec)?;
 
@@ -199,8 +202,15 @@ pub fn run_with(
                     .get(&task.module_name)
                     .ok_or_else(|| PlaybookError::ModuleNotFound(task.module_name.clone()))?;
 
+                let ctx = ExecutionContext {
+                    host,
+                    vars: &vars,
+                    connection: &connection,
+                    check_mode: false,
+                };
+
                 let plan =
-                    module.plan(&rendered_args, host).map_err(|e| PlaybookError::ExecFailed {
+                    module.plan(&rendered_args, &ctx).map_err(|e| PlaybookError::ExecFailed {
                         host: host.name.clone(),
                         message: e.to_string(),
                     })?;
@@ -215,7 +225,7 @@ pub fn run_with(
                 );
 
                 let mut outcome =
-                    module.apply(&plan, host).map_err(|e| PlaybookError::ExecFailed {
+                    module.apply(&plan, &ctx).map_err(|e| PlaybookError::ExecFailed {
                         host: host.name.clone(),
                         message: e.to_string(),
                     })?;
@@ -326,11 +336,17 @@ pub fn run_with(
                 let rendered = templater
                     .render_value(&handler_task.args, &host.vars)
                     .unwrap_or_else(|_| handler_task.args.clone());
-                let plan = module.plan(&rendered, host).map_err(|e| PlaybookError::ExecFailed {
+                let ctx = ExecutionContext {
+                    host,
+                    vars: &host.vars,
+                    connection: &connection,
+                    check_mode: false,
+                };
+                let plan = module.plan(&rendered, &ctx).map_err(|e| PlaybookError::ExecFailed {
                     host: host.name.clone(),
                     message: e.to_string(),
                 })?;
-                let outcome = module.apply(&plan, host).map_err(|e| PlaybookError::ExecFailed {
+                let outcome = module.apply(&plan, &ctx).map_err(|e| PlaybookError::ExecFailed {
                     host: host.name.clone(),
                     message: e.to_string(),
                 })?;

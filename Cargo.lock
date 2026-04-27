@@ -1396,6 +1396,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "runsible-connection",
  "runsible-core",
  "runsible-inventory",
  "runsible-playbook",
@@ -1529,6 +1530,7 @@ dependencies = [
  "clap",
  "indexmap",
  "minijinja",
+ "runsible-connection",
  "runsible-core",
  "runsible-inventory",
  "serde",

@@ -1,0 +1,47 @@
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+command = "runsible_builtin.command"
+shell = "runsible_builtin.shell"
+copy = "runsible_builtin.copy"
+file = "runsible_builtin.file"
+set_fact = "runsible_builtin.set_fact"
+
+[[plays]]
+name = "M1 modules end-to-end"
+hosts = "localhost"
+
+[[plays.tasks]]
+name = "Pick a tmp dir"
+set_fact = { workdir = "/tmp/runsible-m1-demo" }
+
+[[plays.tasks]]
+name = "Ensure workdir"
+file = { path = "{{ workdir }}", state = "directory" }
+
+[[plays.tasks]]
+name = "Drop a file"
+copy = { content = "hello from runsible\n", dest = "{{ workdir }}/hello.txt", mode = "0644" }
+
+[[plays.tasks]]
+name = "Read it back"
+command = { argv = ["cat", "{{ workdir }}/hello.txt"] }
+register = "cat_result"
+
+[[plays.tasks]]
+name = "Show contents"
+debug = { msg = "file says: {{ cat_result.returns.stdout }}" }
+
+[[plays.tasks]]
+name = "Pipe through shell"
+shell = { cmd = "wc -c {{ workdir }}/hello.txt | awk '{print $1}'" }
+register = "size_result"
+
+[[plays.tasks]]
+name = "Show size"
+debug = { msg = "byte count: {{ size_result.returns.stdout }}" }
+
+[[plays.tasks]]
+name = "Cleanup"
+file = { path = "{{ workdir }}", state = "absent" }

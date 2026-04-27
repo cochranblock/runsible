@@ -50,6 +50,28 @@ pub trait Connection: Send + Sync {
     async fn close(&mut self) -> Result<()>;
 }
 
+/// Synchronous connection facade used by the engine + module dispatch.
+///
+/// The engine is sync; modules need a sync interface they can call without
+/// dragging in tokio. `runsible-connection::LocalSync` is the M1 implementation
+/// (std::process + std::fs against the controller machine).
+pub trait SyncConnection: Send + Sync {
+    fn exec(&self, cmd: &Cmd) -> Result<ExecOutcome>;
+    fn put_file(&self, src: &Path, dst: &Path, mode: Option<u32>) -> Result<()>;
+    fn slurp(&self, src: &Path) -> Result<Vec<u8>>;
+    fn file_exists(&self, path: &Path) -> Result<bool>;
+}
+
+/// Bundle of everything a module needs at plan/apply time.
+///
+/// Constructed by the engine for each (host, task) pair.
+pub struct ExecutionContext<'a> {
+    pub host: &'a crate::types::Host,
+    pub vars: &'a crate::types::Vars,
+    pub connection: &'a dyn SyncConnection,
+    pub check_mode: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Cmd {
     pub argv: Vec<String>,

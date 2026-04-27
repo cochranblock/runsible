@@ -43,7 +43,7 @@ runsible workspace (pure Rust, zero Python, TOML-native)
 |--------|-------|
 | Workspace crates | 14 |
 | Implemented crates (M0) | 13 (core, config, inventory, vault, connection, yaml2toml, playbook, runsible, lint, doc, galaxy, pull, test, console) |
-| Total tests (workspace) | 123 |
+| Total tests (workspace) | 131 |
 | Test pass rate | 100% |
 | Rust edition | 2021 |
 | Rust version | 1.94.0 |

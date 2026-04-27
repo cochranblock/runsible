@@ -47,15 +47,22 @@ debug = { msg = "Hello, world!" }
         assert_eq!(task.name.as_deref(), Some("Say hello"));
     }
 
+    fn test_ctx<'a>(host: &'a runsible_core::types::Host, vars: &'a runsible_core::types::Vars, conn: &'a runsible_connection::LocalSync) -> runsible_core::traits::ExecutionContext<'a> {
+        runsible_core::traits::ExecutionContext { host, vars, connection: conn, check_mode: false }
+    }
+
     #[test]
     fn debug_module_plan_and_apply() {
         use runsible_core::types::{Host, Vars};
         let host = Host { name: "localhost".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = test_ctx(&host, &vars, &conn);
         let module = modules::debug::DebugModule;
         let args = toml::from_str::<toml::Value>(r#"msg = "hi""#).unwrap();
-        let plan = catalog::DynModule::plan(&module, &args, &host).unwrap();
+        let plan = catalog::DynModule::plan(&module, &args, &ctx).unwrap();
         assert!(!plan.will_change);
-        let outcome = catalog::DynModule::apply(&module, &plan, &host).unwrap();
+        let outcome = catalog::DynModule::apply(&module, &plan, &ctx).unwrap();
         assert_eq!(outcome.returns["msg"], "hi");
     }
 
@@ -89,10 +96,13 @@ debug = { msg = "hi" }
     fn set_fact_plan_carries_args() {
         use runsible_core::types::{Host, Vars};
         let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = test_ctx(&host, &vars, &conn);
         let m = modules::set_fact::SetFactModule;
         let args = toml::from_str::<toml::Value>(r#"build_id = "abc"
 env = "prod""#).unwrap();
-        let plan = catalog::DynModule::plan(&m, &args, &host).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
         assert!(plan.will_change);
         assert_eq!(plan.diff["build_id"], "abc");
         assert_eq!(plan.diff["env"], "prod");
@@ -102,9 +112,12 @@ env = "prod""#).unwrap();
     fn assert_plan_does_not_change() {
         use runsible_core::types::{Host, Vars};
         let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = test_ctx(&host, &vars, &conn);
         let m = modules::assert_mod::AssertModule;
         let args = toml::from_str::<toml::Value>(r#"that = ["x == 1"]"#).unwrap();
-        let plan = catalog::DynModule::plan(&m, &args, &host).unwrap();
+        let plan = catalog::DynModule::plan(&m, &args, &ctx).unwrap();
         assert!(!plan.will_change);
         assert_eq!(plan.diff["that"][0], "x == 1");
     }
@@ -283,6 +296,92 @@ debug = { msg = "x" }
 "#;
         let err = run(src, "localhost,", "test").unwrap_err();
         assert!(matches!(err, PlaybookError::TypeCheck(_)));
+    }
+
+    #[test]
+    fn command_module_runs_echo() {
+        let src = r#"
+[imports]
+command = "runsible_builtin.command"
+[[plays]]
+name = "Cmd"
+hosts = "localhost"
+[[plays.tasks]]
+name = "echo"
+command = { argv = ["echo", "hello"] }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.changed, 1, "command always reports Changed on rc=0");
+    }
+
+    #[test]
+    fn shell_module_pipes() {
+        let src = r#"
+[imports]
+shell = "runsible_builtin.shell"
+[[plays]]
+name = "Sh"
+hosts = "localhost"
+[[plays.tasks]]
+name = "pipe"
+shell = { cmd = "echo hi | tr a-z A-Z" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.changed, 1);
+    }
+
+    #[test]
+    fn copy_module_creates_then_idempotent() {
+        let dest = std::env::temp_dir().join(format!("rsl-copy-test-{}.txt", std::process::id()));
+        let dest_str = dest.to_string_lossy().replace('\\', "\\\\");
+        let _ = std::fs::remove_file(&dest);
+        let src = format!(r#"
+[imports]
+copy = "runsible_builtin.copy"
+[[plays]]
+name = "Copy"
+hosts = "localhost"
+[[plays.tasks]]
+name = "copy literal"
+copy = {{ content = "hello world", dest = "{dest_str}" }}
+"#);
+        let r = run(&src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.changed, 1);
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "hello world");
+        // Second run: same content → no change.
+        let r2 = run(&src, "localhost,", "test").unwrap();
+        assert_eq!(r2.changed, 0);
+        assert_eq!(r2.ok, 1);
+        let _ = std::fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn file_module_creates_directory() {
+        let dir = std::env::temp_dir().join(format!("rsl-file-test-{}", std::process::id()));
+        let dir_str = dir.to_string_lossy().replace('\\', "\\\\");
+        let _ = std::fs::remove_dir_all(&dir);
+        let src = format!(r#"
+[imports]
+file = "runsible_builtin.file"
+[[plays]]
+name = "Mkdir"
+hosts = "localhost"
+[[plays.tasks]]
+name = "ensure dir"
+file = {{ path = "{dir_str}", state = "directory" }}
+"#);
+        let r = run(&src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.changed, 1);
+        assert!(dir.exists() && dir.is_dir());
+        // Second run: dir exists → no change.
+        let r2 = run(&src, "localhost,", "test").unwrap();
+        assert_eq!(r2.changed, 0);
+        assert_eq!(r2.ok, 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
