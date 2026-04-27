@@ -515,6 +515,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
+name = "exopack"
+version = "0.2.0"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1396,6 +1400,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "runsible-connection",
  "runsible-core",
  "runsible-inventory",
@@ -1403,6 +1408,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1412,10 +1418,12 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "runsible-core",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]
@@ -1426,6 +1434,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
+ "exopack",
  "runsible-core",
  "serde",
  "thiserror",
@@ -1439,12 +1448,14 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "exopack",
  "runsible-core",
  "runsible-playbook",
  "rustyline",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1453,9 +1464,11 @@ name = "runsible-core"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "exopack",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1465,10 +1478,12 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "indexmap",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1478,6 +1493,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "flate2",
  "hex",
  "indexmap",
@@ -1487,6 +1503,7 @@ dependencies = [
  "sha2",
  "tar",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]
@@ -1497,6 +1514,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "globset",
  "indexmap",
  "regex",
@@ -1504,6 +1522,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]
@@ -1514,10 +1533,12 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "runsible-core",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]
@@ -1528,6 +1549,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "indexmap",
  "minijinja",
  "runsible-connection",
@@ -1536,6 +1558,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1547,6 +1570,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "exopack",
  "runsible-config",
  "runsible-core",
  "serde",
@@ -1563,6 +1587,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "indexmap",
  "runsible-core",
  "runsible-galaxy",
@@ -1571,6 +1596,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
 ]
 
@@ -1582,12 +1608,14 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "exopack",
  "indexmap",
  "runsible-core",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]
@@ -2606,9 +2634,11 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "exopack",
  "serde",
  "serde_yaml",
  "thiserror",
+ "tokio",
  "toml 0.8.23",
  "toml_edit",
 ]

@@ -7,9 +7,19 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-core: shared types, errors, and traits for the runsible workspace"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-core-test"
+path = "src/bin/runsible-core-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 async-trait = "0.1"
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

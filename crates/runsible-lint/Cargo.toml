@@ -7,6 +7,9 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-lint: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
 [lib]
 name = "runsible_lint"
 path = "src/lib.rs"
@@ -14,6 +17,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "runsible-lint"
 path = "src/main.rs"
+
+[[bin]]
+name = "runsible-lint-test"
+path = "src/bin/runsible-lint-test.rs"
+required-features = ["tests"]
 
 [dependencies]
 runsible-core = { workspace = true }
@@ -24,3 +32,5 @@ toml_edit = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

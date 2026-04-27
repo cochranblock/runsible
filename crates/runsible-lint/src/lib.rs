@@ -1126,6 +1126,80 @@ fn lint_config_from_file(cf: LintConfigFile) -> LintConfig {
 }
 
 // ---------------------------------------------------------------------------
+// TRIPLE SIMS gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: lint a known-bad playbook and verify the expected rule IDs
+/// fire, then lint a clean playbook and verify zero error-severity findings.
+/// Returns 0 on success; non-zero codes indicate which stage failed.
+pub fn f30() -> i32 {
+    use std::path::Path;
+    let cfg = LintConfig {
+        profile: Profile::Basic,
+        skip_rules: vec![],
+        extra_rules: vec![],
+        severity_overrides: HashMap::new(),
+    };
+
+    // ── Bad playbook: no schema, missing play `name`, two module keys ────────
+    let bad = r#"
+[imports]
+my_debug = "runsible_builtin.debug"
+my_command = "runsible_builtin.command"
+
+[[plays]]
+hosts = "localhost"
+
+[[plays.tasks]]
+name = "ambiguous"
+my_debug = { msg = "a" }
+my_command = { cmd = "echo b" }
+"#;
+    let bad_result = lint_str(bad, Path::new("f30.toml"), &cfg);
+    let bad_ids: HashSet<&str> = bad_result
+        .findings
+        .iter()
+        .map(|f| f.rule_id.as_str())
+        .collect();
+    if !bad_ids.contains("L001") {
+        return 1;
+    }
+    if !bad_ids.contains("L002") {
+        return 2;
+    }
+    if !bad_ids.contains("L005") {
+        return 3;
+    }
+
+    // ── Clean playbook: zero error-severity findings ─────────────────────────
+    let clean = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+
+[[plays]]
+name = "Hello"
+hosts = "localhost"
+
+[[plays.tasks]]
+name = "say hi"
+debug = { msg = "hello" }
+"#;
+    let clean_result = lint_str(clean, Path::new("f30-clean.toml"), &cfg);
+    let error_findings: Vec<_> = clean_result
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .collect();
+    if !error_findings.is_empty() {
+        return 4;
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

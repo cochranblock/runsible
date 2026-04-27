@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-connection"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack"]
+
+[[bin]]
+name = "runsible-connection-test"
+path = "src/bin/runsible-connection-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 runsible-core = { workspace = true }
 serde = { workspace = true }
@@ -22,3 +30,4 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 async-trait = "0.1"
+exopack = { workspace = true, optional = true }

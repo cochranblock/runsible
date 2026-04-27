@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-config"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-config-test"
+path = "src/bin/runsible-config-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 runsible-core = { workspace = true }
 serde = { workspace = true }
@@ -24,3 +32,5 @@ toml_edit = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

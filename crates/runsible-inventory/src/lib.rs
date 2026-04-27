@@ -706,6 +706,66 @@ fn toml_value_to_json(v: toml::Value) -> serde_json::Value {
 }
 
 // ---------------------------------------------------------------------------
+// f30 — TRIPLE SIMS smoke gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: exercise the public API end-to-end. Parse a small inventory
+/// (3 hosts in 2 groups + a `prod` group with `children = [...]`), run the
+/// canonical pattern operators (intersection, exclusion), and verify
+/// numeric range expansion. Returns 0 on success or a non-zero stage code
+/// on failure. Used by the runsible-inventory-test binary's TRIPLE SIMS.
+pub fn f30() -> i32 {
+    const SRC: &str = r#"
+[webservers.hosts]
+web01 = {}
+web02 = {}
+
+[databases.hosts]
+db01 = {}
+
+[prod]
+children = ["webservers", "databases"]
+"#;
+
+    // Stage 1: parse the inventory.
+    let inv = match parse_inventory(SRC) {
+        Ok(i) => i,
+        Err(_) => return 1,
+    };
+
+    // Stage 2: parse `prod:&webservers` — must yield exactly the webservers.
+    let p1 = match parse_pattern("prod:&webservers") {
+        Ok(p) => p,
+        Err(_) => return 2,
+    };
+    let r1 = hosts_matching(&inv, &p1);
+    if r1 != vec!["web01".to_string(), "web02".to_string()] {
+        return 3;
+    }
+
+    // Stage 3: parse `all:!databases` — must yield exactly the webservers.
+    let p2 = match parse_pattern("all:!databases") {
+        Ok(p) => p,
+        Err(_) => return 4,
+    };
+    let r2 = hosts_matching(&inv, &p2);
+    if r2 != vec!["web01".to_string(), "web02".to_string()] {
+        return 5;
+    }
+
+    // Stage 4: numeric range expansion must yield ["web01","web02","web03"].
+    let r3 = match expand_range("web[01:03]") {
+        Ok(v) => v,
+        Err(_) => return 6,
+    };
+    if r3 != vec!["web01".to_string(), "web02".to_string(), "web03".to_string()] {
+        return 7;
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

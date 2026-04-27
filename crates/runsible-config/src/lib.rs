@@ -393,6 +393,46 @@ pub fn init_default() -> String {
     format!("{header}{body}")
 }
 
+/// Smoke gate: exercise the public API end-to-end. Build a default config
+/// via `init_default()`, parse it back into a `Config`, verify the schema
+/// version and the canonical `defaults.forks == 20`, then round-trip a
+/// `Config::default()` through TOML and re-check the same field. Returns 0
+/// on success or a non-zero stage code on failure. Used by the
+/// runsible-config-test binary's TRIPLE SIMS gate.
+pub fn f30() -> i32 {
+    // Stage 1: produce the canonical default config text.
+    let body = init_default();
+    if body.is_empty() {
+        return 1;
+    }
+    // Stage 2: parse it back as Config.
+    let parsed: Config = match toml::from_str(&body) {
+        Ok(c) => c,
+        Err(_) => return 2,
+    };
+    // Stage 3: schema version must match the compiled-in constant.
+    if parsed.schema_version != SCHEMA_VERSION {
+        return 3;
+    }
+    // Stage 4: defaults.forks must be 20 (the canonical Ansible-equivalent).
+    if parsed.defaults.forks != 20 {
+        return 4;
+    }
+    // Stage 5: round-trip Config::default() and re-check forks == 20.
+    let s = match toml::to_string(&Config::default()) {
+        Ok(s) => s,
+        Err(_) => return 5,
+    };
+    let back: Config = match toml::from_str(&s) {
+        Ok(c) => c,
+        Err(_) => return 6,
+    };
+    if back.defaults.forks != 20 {
+        return 7;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

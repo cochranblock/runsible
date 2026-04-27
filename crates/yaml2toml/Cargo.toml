@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "yaml2toml"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "yaml2toml-test"
+path = "src/bin/yaml2toml-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 serde = { workspace = true }
 serde_yaml = { workspace = true }
@@ -23,3 +31,5 @@ toml_edit = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

@@ -7,6 +7,9 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-pull: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[features]
+tests = ["dep:exopack"]
+
 [lib]
 name = "runsible_pull"
 path = "src/lib.rs"
@@ -14,6 +17,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "runsible-pull"
 path = "src/main.rs"
+
+[[bin]]
+name = "runsible-pull-test"
+path = "src/bin/runsible-pull-test.rs"
+required-features = ["tests"]
 
 [dependencies]
 runsible-core = { workspace = true }
@@ -27,6 +35,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
 dirs = { workspace = true }
+exopack = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

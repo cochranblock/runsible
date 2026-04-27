@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-inventory"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-inventory-test"
+path = "src/bin/runsible-inventory-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 runsible-core = { workspace = true }
 serde = { workspace = true }
@@ -27,3 +35,5 @@ thiserror = { workspace = true }
 indexmap = { workspace = true }
 globset = { workspace = true }
 regex = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

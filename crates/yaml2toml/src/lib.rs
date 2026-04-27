@@ -505,6 +505,73 @@ fn yaml_to_toml_value(
     }
 }
 
+// ─── TRIPLE SIMS gate ────────────────────────────────────────────────────────
+
+/// Smoke gate: exercise the public `convert` API end-to-end across all three
+/// shapes the converter supports. Returns 0 on full success; distinct non-zero
+/// codes on each failure path.
+pub fn f30() -> i32 {
+    // Stage 1: Vars profile — int + string round-trip through TOML.
+    let vars_yaml = "http_port: 8080\nname: webhost\n";
+    let vars_res = match convert(vars_yaml, Profile::Vars) {
+        Ok(r) => r,
+        Err(_) => return 1,
+    };
+    let vars_parsed: toml::Value = match toml::from_str(&vars_res.toml) {
+        Ok(v) => v,
+        Err(_) => return 2,
+    };
+    if vars_parsed.get("http_port").and_then(|v| v.as_integer()) != Some(8080) {
+        return 3;
+    }
+    if vars_parsed.get("name").and_then(|v| v.as_str()) != Some("webhost") {
+        return 4;
+    }
+
+    // Stage 2: Auto profile with a null — must produce a non-empty warnings vec.
+    let null_yaml = "null_field: ~\n";
+    let null_res = match convert(null_yaml, Profile::Auto) {
+        Ok(r) => r,
+        Err(_) => return 5,
+    };
+    if null_res.warnings.is_empty() {
+        return 6;
+    }
+    if !null_res
+        .warnings
+        .iter()
+        .any(|w| w.contains("null"))
+    {
+        return 7;
+    }
+
+    // Stage 3: Playbook profile — single play with empty tasks list.
+    let pb_yaml = "- name: x\n  hosts: localhost\n  tasks: []\n";
+    let pb_res = match convert(pb_yaml, Profile::Playbook) {
+        Ok(r) => r,
+        Err(_) => return 8,
+    };
+    let pb_parsed: toml::Value = match toml::from_str(&pb_res.toml) {
+        Ok(v) => v,
+        Err(_) => return 9,
+    };
+    let plays = match pb_parsed.get("plays").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return 10,
+    };
+    if plays.len() != 1 {
+        return 11;
+    }
+    if plays[0].get("name").and_then(|v| v.as_str()) != Some("x") {
+        return 12;
+    }
+    if plays[0].get("hosts").and_then(|v| v.as_str()) != Some("localhost") {
+        return 13;
+    }
+
+    0
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-galaxy"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-galaxy-test"
+path = "src/bin/runsible-galaxy-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,3 +37,5 @@ tar = { workspace = true }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

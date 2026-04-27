@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-playbook"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-playbook-test"
+path = "src/bin/runsible-playbook-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 runsible-core = { workspace = true }
 runsible-inventory = { workspace = true }
@@ -27,3 +35,5 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 indexmap = { workspace = true }
 minijinja = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

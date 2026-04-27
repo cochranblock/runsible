@@ -12,6 +12,52 @@ pub use errors::{ConsoleError, Result};
 pub use parse::{parse_line, ReplCommand};
 pub use repl::run_repl;
 
+// ---------------------------------------------------------------------------
+// TRIPLE SIMS gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: parse every grammar form (Quit, Empty, Comment, Invoke with
+/// args, case-insensitive Quit) through `parse_line`, verifying each variant
+/// matches the expected `ReplCommand` and the args round-trip correctly.
+/// Returns 0 on success.
+pub fn f30() -> i32 {
+    // ── Stage 1: "quit" → Quit ──────────────────────────────────────────────
+    if !matches!(parse_line("quit"), ReplCommand::Quit) {
+        return 1;
+    }
+
+    // ── Stage 2: "" → Empty ─────────────────────────────────────────────────
+    if !matches!(parse_line(""), ReplCommand::Empty) {
+        return 2;
+    }
+
+    // ── Stage 3: "# comment" → Comment ──────────────────────────────────────
+    if !matches!(parse_line("# comment"), ReplCommand::Comment) {
+        return 3;
+    }
+
+    // ── Stage 4: "debug msg=hello" → Invoke { module: "debug", args.msg=="hello" }
+    match parse_line("debug msg=hello") {
+        ReplCommand::Invoke { module, args } => {
+            if module != "debug" {
+                return 4;
+            }
+            match args.get("msg").and_then(|v| v.as_str()) {
+                Some("hello") => {}
+                _ => return 5,
+            }
+        }
+        _ => return 6,
+    }
+
+    // ── Stage 5: "EXIT" (case-insensitive) → Quit ──────────────────────────
+    if !matches!(parse_line("EXIT"), ReplCommand::Quit) {
+        return 7;
+    }
+
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

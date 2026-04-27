@@ -41,6 +41,62 @@ pub fn encrypt_string(
 }
 
 // ---------------------------------------------------------------------------
+// f30 — TRIPLE SIMS smoke gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: exercise the public API end-to-end. Generate an age keypair,
+/// encrypt a fixed payload to it, decrypt and verify the round-trip, then
+/// emit a vault envelope around the ciphertext and parse it back. Returns
+/// 0 on success or a non-zero stage code on failure. Used by the
+/// runsible-vault-test binary's TRIPLE SIMS gate.
+pub fn f30() -> i32 {
+    use crate::crypto::{decrypt_bytes, encrypt_bytes};
+    use crate::envelope::{emit_envelope, parse_envelope};
+    use crate::keys::keygen;
+
+    const PAYLOAD: &[u8] = b"runsible-vault f30 payload";
+
+    // Stage 1: generate a fresh age keypair.
+    let (identity, recipient) = keygen();
+
+    // Stage 2: encrypt the payload to the recipient.
+    let recipients: Vec<Box<dyn age::Recipient + Send>> =
+        vec![Box::new(recipient) as Box<dyn age::Recipient + Send>];
+    let ciphertext = match encrypt_bytes(PAYLOAD, recipients) {
+        Ok(c) => c,
+        Err(_) => return 1,
+    };
+
+    // Stage 3: decrypt the ciphertext using the matching identity.
+    let identities: Vec<Box<dyn age::Identity>> =
+        vec![Box::new(identity) as Box<dyn age::Identity>];
+    let decrypted = match decrypt_bytes(&ciphertext, &identities) {
+        Ok(d) => d,
+        Err(_) => return 2,
+    };
+
+    // Stage 4: decrypted bytes must equal the original payload.
+    if decrypted != PAYLOAD {
+        return 3;
+    }
+
+    // Stage 5: envelope round-trip — emit then parse, body must match ciphertext.
+    let envelope = emit_envelope(&ciphertext, 1);
+    let parsed = match parse_envelope(&envelope) {
+        Ok(p) => p,
+        Err(_) => return 4,
+    };
+    if parsed.recipient_count != 1 {
+        return 5;
+    }
+    if parsed.body != ciphertext {
+        return 6;
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Integration tests
 // ---------------------------------------------------------------------------
 

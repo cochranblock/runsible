@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "runsible-vault"
 path = "src/main.rs"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
+[[bin]]
+name = "runsible-vault-test"
+path = "src/bin/runsible-vault-test.rs"
+required-features = ["tests"]
+
 [dependencies]
 runsible-core = { workspace = true }
 serde = { workspace = true }
@@ -27,6 +35,8 @@ thiserror = { workspace = true }
 age = { workspace = true }
 base64 = { workspace = true }
 indexmap = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -7,6 +7,9 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-doc: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[features]
+tests = ["dep:exopack", "dep:tokio"]
+
 [lib]
 name = "runsible_doc"
 path = "src/lib.rs"
@@ -14,6 +17,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "runsible-doc"
 path = "src/main.rs"
+
+[[bin]]
+name = "runsible-doc-test"
+path = "src/bin/runsible-doc-test.rs"
+required-features = ["tests"]
 
 [dependencies]
 serde = { workspace = true }
@@ -23,3 +31,5 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 indexmap = { workspace = true }
+exopack = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }

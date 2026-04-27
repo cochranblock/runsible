@@ -144,6 +144,41 @@ pub fn exit_code(result: &RunResult) -> i32 {
     result.exit_code()
 }
 
+// ── TRIPLE SIMS gate ──────────────────────────────────────────────────────────
+
+/// Smoke gate: build a synthetic playbook for `runsible_builtin.ping` against
+/// pattern `all` with empty args, run it on `localhost,`, and verify the exit
+/// counters. Returns 0 on full success; distinct non-zero codes for each
+/// failure stage.
+pub fn f30() -> i32 {
+    let args = match parse_args("") {
+        Ok(v) => v,
+        Err(_) => return 1,
+    };
+    let src = match build_synthetic_playbook("all", "runsible_builtin.ping", &args) {
+        Ok(s) => s,
+        Err(_) => return 2,
+    };
+    // Synthetic must be valid TOML on its face.
+    if toml::from_str::<toml::Value>(&src).is_err() {
+        return 3;
+    }
+    let result = match run(&src, "localhost,", "f30") {
+        Ok(r) => r,
+        Err(_) => return 4,
+    };
+    if result.failed != 0 {
+        return 5;
+    }
+    if result.ok != 1 {
+        return 6;
+    }
+    if exit_code(&result) != 0 {
+        return 7;
+    }
+    0
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

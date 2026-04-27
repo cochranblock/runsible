@@ -98,6 +98,86 @@ pub fn pull_once(cfg: &PullConfig) -> Result<Heartbeat> {
     Ok(hb)
 }
 
+// ---------------------------------------------------------------------------
+// TRIPLE SIMS gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: build a Heartbeat, write it atomically to a tempfile, read it
+/// back, verify schema field and errors round-trip exactly. Returns 0 on
+/// success; non-zero codes indicate which stage failed.
+pub fn f30() -> i32 {
+    use std::path::PathBuf;
+
+    // Use process id + nanosecond ts to avoid concurrent-test races.
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!("runsible-pull-f30-{pid}-{nanos}"));
+    if let Err(_) = std::fs::create_dir_all(&dir) {
+        return 1;
+    }
+    let path: PathBuf = dir.join("heartbeat.json");
+
+    let errors = vec![
+        "fetch: timed out".to_string(),
+        "apply: bad rc".to_string(),
+    ];
+
+    let hb = Heartbeat::new(
+        "2026-04-26T12:34:56Z".into(),
+        "2026-04-26T12:35:01Z".into(),
+        5234,
+        "https://example.com/repo.git".into(),
+        "abc1234".into(),
+        "playbooks/site.toml".into(),
+        HeartbeatResult {
+            exit_code: 0,
+            ok: 1,
+            changed: 0,
+            failed: 0,
+        },
+        errors.clone(),
+    );
+
+    if hb.schema != HEARTBEAT_SCHEMA {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 2;
+    }
+
+    if let Err(_) = hb.write_atomic(&path) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 3;
+    }
+
+    let read_back = match Heartbeat::read(&path) {
+        Ok(h) => h,
+        Err(_) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return 4;
+        }
+    };
+
+    if read_back.schema != "runsible.pull.heartbeat.v1" {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 5;
+    }
+
+    if read_back.errors != errors {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 6;
+    }
+
+    if read_back != hb {
+        let _ = std::fs::remove_dir_all(&dir);
+        return 7;
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

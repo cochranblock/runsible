@@ -448,6 +448,49 @@ fn builtin_ping() -> ModuleDoc {
 }
 
 // ---------------------------------------------------------------------------
+// TRIPLE SIMS gate
+// ---------------------------------------------------------------------------
+
+/// Smoke gate: build the builtins registry, look up debug+ping docs, render
+/// each in text + markdown + snippet form, and check the rendered output
+/// contains the expected sections. Returns 0 on success.
+pub fn f30() -> i32 {
+    let reg = DocRegistry::builtins();
+
+    let debug = match reg.get("runsible_builtin.debug") {
+        Some(d) => d,
+        None => return 1,
+    };
+    if reg.get("runsible_builtin.ping").is_none() {
+        return 2;
+    }
+
+    let text = render_text(debug);
+    if !text.contains("OPTIONS") {
+        return 3;
+    }
+    if !text.contains("EXAMPLES") {
+        return 4;
+    }
+
+    let md = render_markdown(debug);
+    if !md.contains("# runsible_builtin.debug") {
+        return 5;
+    }
+
+    let ping = match reg.get("runsible_builtin.ping") {
+        Some(d) => d,
+        None => return 6,
+    };
+    let snippet = render_snippet(ping);
+    if !snippet.contains("ping = ") {
+        return 7;
+    }
+
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

@@ -12,6 +12,50 @@ pub use engine::{run, RunResult};
 pub use errors::{PlaybookError, Result};
 pub use templating::Templater;
 
+/// Smoke gate: drive the public `run` API end-to-end with a synthetic two-task
+/// playbook (set_fact, then debug templating the fact). Returns 0 only when the
+/// run reports `ok == 2 && failed == 0 && exit_code == 0`. Distinct non-zero
+/// codes for parse failure, run error, and wrong counters.
+pub fn f30() -> i32 {
+    let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+set_fact = "runsible_builtin.set_fact"
+
+[[plays]]
+name = "f30"
+hosts = "localhost"
+
+[[plays.tasks]]
+set_fact = { x = 42 }
+
+[[plays.tasks]]
+debug = { msg = "x is {{ x }}" }
+"#;
+
+    // Pre-flight: ensure the playbook actually parses with the public parser.
+    if parse::parse_playbook(src).is_err() {
+        return 1;
+    }
+
+    let result = match run(src, "localhost,", "f30") {
+        Ok(r) => r,
+        Err(_) => return 2,
+    };
+
+    if result.failed != 0 {
+        return 3;
+    }
+    if result.ok != 2 {
+        return 4;
+    }
+    if result.exit_code() != 0 {
+        return 5;
+    }
+
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
