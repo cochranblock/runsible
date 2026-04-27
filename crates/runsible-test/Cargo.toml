@@ -7,6 +7,25 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-test: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "runsible_test"
+path = "src/lib.rs"
+
 [[bin]]
 name = "runsible-test"
 path = "src/main.rs"
+
+[dependencies]
+runsible-core = { workspace = true }
+runsible-galaxy = { workspace = true }
+runsible-lint = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

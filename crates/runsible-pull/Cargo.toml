@@ -7,6 +7,26 @@ repository.workspace = true
 authors.workspace = true
 description = "runsible-pull: 1-for-1 Rust/TOML reimagining of the corresponding Ansible tool"
 
+[lib]
+name = "runsible_pull"
+path = "src/lib.rs"
+
 [[bin]]
 name = "runsible-pull"
 path = "src/main.rs"
+
+[dependencies]
+runsible-core = { workspace = true }
+runsible-config = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

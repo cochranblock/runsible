@@ -42,14 +42,14 @@ runsible workspace (pure Rust, zero Python, TOML-native)
 | Metric | Value |
 |--------|-------|
 | Workspace crates | 14 |
-| Implemented crates (M0) | 10 (core, config, inventory, vault, connection, yaml2toml, playbook, runsible, lint, doc, galaxy) |
-| Total tests (workspace) | 72 |
+| Implemented crates (M0) | 13 (core, config, inventory, vault, connection, yaml2toml, playbook, runsible, lint, doc, galaxy, pull, test, console) |
+| Total tests (workspace) | 98 |
 | Test pass rate | 100% |
 | Rust edition | 2021 |
 | Rust version | 1.94.0 |
 | Cloud dependencies | Zero |
 | Python runtime required | Zero |
-| External crates (key) | age 0.10, toml 0.8, toml_edit 0.22, serde 1, clap 4, thiserror 1, indexmap 2, globset 0.4, regex 1, tokio 1, semver 1, tar 0.4, flate2 1, sha2 0.10 |
+| External crates (key) | age 0.10, toml 0.8, toml_edit 0.22, serde 1, clap 4, thiserror 1, indexmap 2, globset 0.4, regex 1, tokio 1, semver 1, tar 0.4, flate2 1, sha2 0.10, rustyline 14, colored 2, chrono 0.4 |
 
 ## Validation
 

@@ -41,12 +41,21 @@ regex = "1"
 age = { version = "0.10", features = ["armor"] }
 base64 = "0.22"
 runsible-core = { path = "crates/runsible-core", version = "0.0.1" }
+runsible-config = { path = "crates/runsible-config", version = "0.0.1" }
 runsible-inventory = { path = "crates/runsible-inventory", version = "0.0.1" }
 runsible-playbook = { path = "crates/runsible-playbook", version = "0.0.1" }
 runsible-connection = { path = "crates/runsible-connection", version = "0.0.1" }
 runsible-vault = { path = "crates/runsible-vault", version = "0.0.1" }
+runsible-galaxy = { path = "crates/runsible-galaxy", version = "0.0.1" }
+runsible-lint = { path = "crates/runsible-lint", version = "0.0.1" }
+runsible-doc = { path = "crates/runsible-doc", version = "0.0.1" }
 semver = "1"
 tar = "0.4"
 flate2 = "1"
 sha2 = "0.10"
 hex = "0.4"
+rustyline = "14"
+colored = "2"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+tempfile = "3"

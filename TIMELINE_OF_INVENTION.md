@@ -10,6 +10,14 @@
 
 ## Entries
 
+### 2026-04-26 — Phase 4 M0: runsible-pull, runsible-test, runsible-console
+
+**What:** Implemented M0 milestones for all three Phase 4 operator-tool crates in parallel. `runsible-pull`: git fetch from HTTPS/file:// URL via system `git`, spawn `runsible-playbook` against fetched bundle, atomic `heartbeat.json` write (`<path>.tmp` + rename), `runsible.pull.heartbeat.v1` schema, `--once`/`status`/`init` CLI. `runsible-test`: 7 sanity rules (S001–S007) over a runsible package directory, `units` runs `cargo test` over package's `crates/`, `env --show` discovery (Rust+cargo+sibling binaries), text+json output, dogfoods against the workspace itself. `runsible-console`: rustyline REPL, `<module> [k=v ...]` grammar reusing the synthetic-playbook engine pattern, colored summary line via `colored` crate, `quit`/`exit`/Ctrl-D exit cleanly. Workspace: 98/98 tests green.
+**Why:** Phase 4 ships the operator-experience surface. Pull-mode is the P2 MSP wedge (one config per tenant + systemd timer + heartbeat). The test runner is the P3 compliance wedge (signed, reproducible test runs). The console is the P4 solo/homelab wedge (interactive ad-hoc with feedback in <100ms).
+**Commit:** pending
+**AI Role:** AI implemented all three crates in parallel agent runs. Human directed Phase 4 execution and validated dogfooding behavior.
+**Proof:** `~/.cargo/bin/cargo test --workspace` — 98 tests pass; `./target/debug/runsible-test sanity .` correctly reports S001+S007 against workspace root (expected); `echo quit | ./target/debug/runsible-console` exits clean
+
 ### 2026-04-26 — Phase 3 M0: runsible, runsible-lint, runsible-doc, runsible-galaxy
 
 **What:** Implemented M0 milestones for all four Phase 3 surface-tool crates in parallel. `runsible` ad-hoc CLI: added `ping` module to playbook catalog, synthetic-playbook approach reuses engine, `runsible all -m runsible_builtin.ping -i localhost,` works. `runsible-lint`: 20 rules (L001–L020) across schema/style/safety categories, `text`+`json` output, `noqa` suppression, `.runsible-lint.toml` discovery, `--profile`/`--explain`/`--list-rules` CLI. `runsible-doc`: `ModuleDoc` schema, `DocRegistry`, hand-authored docs for `debug`+`ping`, `list`/`show`/`snippet` CLI with text/json/markdown output. `runsible-galaxy`: package manifest, `.runsible-pkg` tarball format, file:// registry index, greedy dependency resolver, `runsible.lock` r/w, `init`/`build`/`install`/`list`/`info`/`add` CLI. Workspace: 72/72 tests green.
