@@ -182,4 +182,186 @@ mod tests {
         let conn = LocalSync;
         assert!(!conn.file_exists(Path::new("/nonexistent/path/xyz123")).unwrap());
     }
+
+    // ── Added coverage ─────────────────────────────────────────────────
+
+    /// Exec with env vars: FOO=bar then `sh -c 'echo $FOO'` -> stdout "bar\n".
+    #[test]
+    fn sync_exec_with_env_vars() {
+        if std::process::Command::new("sh").arg("-c").arg("true").output().is_err() {
+            eprintln!("skip: no sh available");
+            return;
+        }
+        let conn = LocalSync;
+        let cmd = Cmd {
+            argv: vec!["sh".into(), "-c".into(), "echo $FOO".into()],
+            stdin: None,
+            env: vec![("FOO".into(), "bar".into())],
+            cwd: None,
+            become_: None,
+            timeout: None,
+            tty: false,
+        };
+        let out = conn.exec(&cmd).unwrap();
+        assert_eq!(out.rc, 0);
+        assert_eq!(out.stdout, b"bar\n");
+    }
+
+    /// Exec with cwd set: `pwd` should print the cwd.
+    #[test]
+    fn sync_exec_with_cwd() {
+        if std::process::Command::new("pwd").output().is_err() {
+            eprintln!("skip: no pwd available");
+            return;
+        }
+        let dir = std::env::temp_dir();
+        let conn = LocalSync;
+        let cmd = Cmd {
+            argv: vec!["pwd".into()],
+            stdin: None,
+            env: vec![],
+            cwd: Some(dir.clone()),
+            become_: None,
+            timeout: None,
+            tty: false,
+        };
+        let out = conn.exec(&cmd).unwrap();
+        assert_eq!(out.rc, 0);
+        // pwd output ends with \n; canonicalize both sides for symlink tolerance
+        let stdout = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+        let want = std::fs::canonicalize(&dir)
+            .ok()
+            .and_then(|p| p.to_str().map(String::from));
+        let got = std::fs::canonicalize(&stdout)
+            .ok()
+            .and_then(|p| p.to_str().map(String::from));
+        match (want, got) {
+            (Some(w), Some(g)) => assert_eq!(w, g),
+            _ => assert_eq!(stdout, dir.to_string_lossy()),
+        }
+    }
+
+    /// stdin piped to `cat` is echoed back.
+    #[test]
+    fn sync_exec_pipe_stdin() {
+        if std::process::Command::new("cat").arg("/dev/null").output().is_err() {
+            eprintln!("skip: no cat available");
+            return;
+        }
+        let conn = LocalSync;
+        let cmd = Cmd {
+            argv: vec!["cat".into()],
+            stdin: Some(b"hello".to_vec()),
+            env: vec![],
+            cwd: None,
+            become_: None,
+            timeout: None,
+            tty: false,
+        };
+        let out = conn.exec(&cmd).unwrap();
+        assert_eq!(out.rc, 0);
+        assert_eq!(out.stdout, b"hello");
+    }
+
+    /// Exec with an empty argv must surface an error.
+    #[test]
+    fn sync_exec_empty_argv_errors() {
+        let conn = LocalSync;
+        let cmd = Cmd {
+            argv: vec![],
+            stdin: None,
+            env: vec![],
+            cwd: None,
+            become_: None,
+            timeout: None,
+            tty: false,
+        };
+        let res = conn.exec(&cmd);
+        assert!(res.is_err(), "expected error on empty argv");
+    }
+
+    /// Non-UTF8 stdout — use `printf '\xff\xfe'` and check the raw bytes.
+    #[test]
+    fn sync_exec_non_utf8_stdout() {
+        if std::process::Command::new("printf").arg("hi").output().is_err() {
+            eprintln!("skip: no printf available");
+            return;
+        }
+        let conn = LocalSync;
+        let cmd = Cmd {
+            argv: vec!["printf".into(), "\\xff\\xfe".into()],
+            stdin: None,
+            env: vec![],
+            cwd: None,
+            become_: None,
+            timeout: None,
+            tty: false,
+        };
+        let out = conn.exec(&cmd).unwrap();
+        assert_eq!(out.rc, 0);
+        assert_eq!(out.stdout, vec![0xff, 0xfe]);
+    }
+
+    /// put_file should create parent directories if missing.
+    #[test]
+    fn sync_put_file_creates_parent_dirs() {
+        let conn = LocalSync;
+        let pid = std::process::id();
+        let src = std::env::temp_dir().join(format!("rsl-sync-mkparent-src-{}.txt", pid));
+        std::fs::write(&src, b"mkparent").unwrap();
+        let nested = std::env::temp_dir()
+            .join(format!("rsl-sync-mkparent-{}", pid))
+            .join("a")
+            .join("b")
+            .join("c");
+        let dst = nested.join("dst.txt");
+        // Make sure the deep dir does not exist before the call
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("rsl-sync-mkparent-{}", pid)),
+        );
+
+        conn.put_file(&src, &dst, None).expect("put_file mkparent");
+        let bytes = std::fs::read(&dst).unwrap();
+        assert_eq!(bytes, b"mkparent");
+
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("rsl-sync-mkparent-{}", pid)),
+        );
+    }
+
+    /// put_file overwrites an existing destination file.
+    #[test]
+    fn sync_put_file_overwrites_existing() {
+        let conn = LocalSync;
+        let pid = std::process::id();
+        let src = std::env::temp_dir().join(format!("rsl-sync-overwrite-src-{}.txt", pid));
+        let dst = std::env::temp_dir().join(format!("rsl-sync-overwrite-dst-{}.txt", pid));
+
+        std::fs::write(&dst, b"OLD").unwrap();
+        std::fs::write(&src, b"NEW").unwrap();
+
+        conn.put_file(&src, &dst, None).expect("overwrite");
+        let bytes = std::fs::read(&dst).unwrap();
+        assert_eq!(bytes, b"NEW");
+
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
+    }
+
+    /// file_exists: false for a missing path, true for a real tempfile.
+    #[test]
+    fn sync_file_exists_true_and_false() {
+        let conn = LocalSync;
+        let pid = std::process::id();
+        let exists_path = std::env::temp_dir().join(format!("rsl-sync-fe-{}.txt", pid));
+        std::fs::write(&exists_path, b"x").unwrap();
+
+        assert!(!conn
+            .file_exists(Path::new("/nonexistent/path/xyz123-rsl"))
+            .unwrap());
+        assert!(conn.file_exists(&exists_path).unwrap());
+
+        let _ = std::fs::remove_file(&exists_path);
+    }
 }

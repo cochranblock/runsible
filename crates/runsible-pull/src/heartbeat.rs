@@ -194,4 +194,43 @@ mod tests {
         let err = Heartbeat::read(&path).unwrap_err();
         assert!(matches!(err, PullError::HeartbeatMissing(_)));
     }
+
+    #[test]
+    fn heartbeat_schema_constant_is_v1() {
+        // Lock the wire schema; bumping it is intentionally a breaking change
+        // and must trip this test until consumers are updated.
+        assert_eq!(HEARTBEAT_SCHEMA, "runsible.pull.heartbeat.v1");
+        let hb = sample();
+        assert_eq!(hb.schema, "runsible.pull.heartbeat.v1");
+    }
+
+    #[test]
+    fn heartbeat_with_errors_serializes_messages() {
+        let mut hb = sample();
+        hb.errors = vec!["fetch: timed out".into(), "apply: bad rc".into()];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("heartbeat.json");
+        hb.write_atomic(&path).unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("fetch: timed out"));
+        assert!(body.contains("apply: bad rc"));
+
+        // And it round-trips back through the typed read path.
+        let read_back = Heartbeat::read(&path).unwrap();
+        assert_eq!(read_back.errors, hb.errors);
+    }
+
+    #[test]
+    fn heartbeat_read_non_json_returns_invalid_heartbeat_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("heartbeat.json");
+        std::fs::write(&path, b"<<not json at all>>").unwrap();
+        let err = Heartbeat::read(&path).unwrap_err();
+        match err {
+            PullError::InvalidHeartbeatJson { path: p, source: _ } => {
+                assert_eq!(p, path);
+            }
+            other => panic!("expected InvalidHeartbeatJson, got {other:?}"),
+        }
+    }
 }

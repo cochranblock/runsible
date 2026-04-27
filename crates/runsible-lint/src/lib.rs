@@ -1297,6 +1297,262 @@ runsible_builtin.command = { cmd = "might fail" }
         assert_eq!(ids.len(), rules.len(), "Rule IDs must be unique");
     }
 
+    // ── New: helper used by added tests below ───────────────────────────────
+    fn lint_check(src: &str) -> Vec<String> {
+        let cfg = LintConfig {
+            profile: Profile::Production,
+            skip_rules: vec![],
+            extra_rules: vec![],
+            severity_overrides: HashMap::new(),
+        };
+        let r = lint_str(src, std::path::Path::new("test.toml"), &cfg);
+        r.findings.iter().map(|f| f.rule_id.clone()).collect()
+    }
+
+    // ── New: empty plays array fires L007 (Warning) ─────────────────────────
+    #[test]
+    fn empty_plays_array_fires_l007() {
+        let src = "schema = \"runsible.playbook.v1\"\nplays = []\n";
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L007"),
+            "L007 should fire on empty plays; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: play missing hosts fires L008 (Error) ──────────────────────────
+    #[test]
+    fn play_missing_hosts_fires_l008() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "no-hosts play"
+[[plays.tasks]]
+name = "t"
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L008"),
+            "L008 should fire when hosts is missing; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: two plays with same name fire L009 ─────────────────────────────
+    #[test]
+    fn duplicate_play_names_fire_l009() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "Same"
+hosts = "localhost"
+[[plays.tasks]]
+name = "ta"
+runsible_builtin.debug = { msg = "a" }
+
+[[plays]]
+name = "Same"
+hosts = "localhost"
+[[plays.tasks]]
+name = "tb"
+runsible_builtin.debug = { msg = "b" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L009"),
+            "L009 should fire on duplicate play names; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: two tasks with same name in one play fire L010 ────────────────
+    #[test]
+    fn duplicate_task_names_fire_l010() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "dup"
+runsible_builtin.debug = { msg = "1" }
+[[plays.tasks]]
+name = "dup"
+runsible_builtin.debug = { msg = "2" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L010"),
+            "L010 should fire on duplicate task names; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: task name >80 chars fires L011 ─────────────────────────────────
+    #[test]
+    fn long_task_name_fires_l011() {
+        let long_name = "A".repeat(81);
+        let src = format!(
+            r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "{}"
+runsible_builtin.debug = {{ msg = "x" }}
+"#,
+            long_name
+        );
+        let ids = lint_check(&src);
+        assert!(
+            ids.iter().any(|id| id == "L011"),
+            "L011 should fire on >80 char task name; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: play name >80 chars fires L012 ─────────────────────────────────
+    #[test]
+    fn long_play_name_fires_l012() {
+        let long_name = "B".repeat(81);
+        let src = format!(
+            r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "{}"
+hosts = "localhost"
+[[plays.tasks]]
+name = "t"
+runsible_builtin.debug = {{ msg = "x" }}
+"#,
+            long_name
+        );
+        let ids = lint_check(&src);
+        assert!(
+            ids.iter().any(|id| id == "L012"),
+            "L012 should fire on >80 char play name; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: empty [imports] fires L013 (Info) ──────────────────────────────
+    #[test]
+    fn empty_imports_fires_l013() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "t"
+runsible_builtin.debug = { msg = "x" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L013"),
+            "L013 should fire on empty [imports]; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: ignore_errors = true fires L017 (already in helper-style) ──────
+    #[test]
+    fn ignore_errors_fires_l017_via_helper() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "risky"
+ignore_errors = true
+runsible_builtin.command = { cmd = "false" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L017"),
+            "L017 should fire on ignore_errors=true; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: command with shell metacharacters fires L019 ──────────────────
+    // L019 fires when the resolved module is `command` and the cmd contains
+    // shell metacharacters. We use [imports] to make `command` an alias that
+    // resolves to runsible_builtin.command (single top-level task key).
+    #[test]
+    fn command_with_shell_metas_fires_l019() {
+        let src = r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+command = "runsible_builtin.command"
+
+[[plays]]
+name = "P"
+hosts = "localhost"
+[[plays.tasks]]
+name = "piped"
+command = { cmd = "ls | grep foo" }
+"#;
+        let ids = lint_check(src);
+        assert!(
+            ids.iter().any(|id| id == "L019"),
+            "L019 should fire on shell metas in cmd; got {:?}",
+            ids
+        );
+    }
+
+    // ── New: noqa on a line skips that rule for findings on that line ──────
+    // L019's finding gets its line via line_of_pattern("piped-task"), so we
+    // place the noqa comment on the task-name line.
+    #[test]
+    fn noqa_skips_rule_on_line() {
+        // Baseline: same playbook without noqa fires L019.
+        let src_no_noqa = "schema = \"runsible.playbook.v1\"\n\
+                           \n\
+                           [imports]\n\
+                           command = \"runsible_builtin.command\"\n\
+                           \n\
+                           [[plays]]\n\
+                           name = \"P\"\n\
+                           hosts = \"localhost\"\n\
+                           [[plays.tasks]]\n\
+                           name = \"piped-task\"\n\
+                           command = { cmd = \"ls | grep foo\" }\n";
+        let ids_before = lint_check(src_no_noqa);
+        assert!(
+            ids_before.iter().any(|id| id == "L019"),
+            "baseline: L019 should fire; got {:?}",
+            ids_before
+        );
+
+        // With noqa on the task-name line, the finding's line == noqa line.
+        let src_with_noqa = "schema = \"runsible.playbook.v1\"\n\
+                             \n\
+                             [imports]\n\
+                             command = \"runsible_builtin.command\"\n\
+                             \n\
+                             [[plays]]\n\
+                             name = \"P\"\n\
+                             hosts = \"localhost\"\n\
+                             [[plays.tasks]]\n\
+                             name = \"piped-task\"  # runsible: noqa L019\n\
+                             command = { cmd = \"ls | grep foo\" }\n";
+        let ids_after = lint_check(src_with_noqa);
+        assert!(
+            !ids_after.iter().any(|id| id == "L019"),
+            "L019 should be suppressed by noqa; got {:?}",
+            ids_after
+        );
+    }
+
     // ── T10: clean minimal playbook produces zero findings ────────────────────
     #[test]
     fn lint_clean_playbook() {

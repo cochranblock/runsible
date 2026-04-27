@@ -95,4 +95,34 @@ mod tests {
         path.push(format!("runsible-lock-test-{}.toml", std::process::id()));
         path
     }
+
+    // ── New: empty lockfile (0 packages) round-trips ───────────────────────
+    #[test]
+    fn empty_lockfile_roundtrip() {
+        let lock = Lockfile::new();
+        assert_eq!(lock.packages.len(), 0);
+
+        let s = lock.to_toml_string().expect("serialize");
+        // Re-parse must succeed.
+        let parsed = Lockfile::from_str(&s).expect("re-parse");
+        assert_eq!(parsed.schema_version, 1);
+        assert_eq!(parsed.packages.len(), 0);
+    }
+
+    // ── New: lockfile with newer schema_version still parses (current behavior) ─
+    // Locks current behavior: there's no version gate yet. Test documents
+    // that a schema_version > 1 deserializes OK.
+    #[test]
+    fn lockfile_future_schema_version_deserializes() {
+        let src = r#"
+schema_version = 99
+packages = []
+"#;
+        let parsed = Lockfile::from_str(src).expect("parse should succeed currently");
+        assert_eq!(
+            parsed.schema_version, 99,
+            "current behavior: future schema_versions are accepted as-is"
+        );
+        assert_eq!(parsed.packages.len(), 0);
+    }
 }

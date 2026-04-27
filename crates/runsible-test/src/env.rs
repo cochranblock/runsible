@@ -191,4 +191,64 @@ mod tests {
         );
         assert!(!report.runsible_test_version.is_empty());
     }
+
+    #[test]
+    fn find_cargo_returns_dot_cargo_bin_when_present() {
+        // If `~/.cargo/bin/cargo` exists on this box (it does on the test
+        // node), `find_cargo()` MUST prefer it. Otherwise the function may
+        // fall back to PATH lookup, in which case the assertion is relaxed
+        // to "some cargo was found OR none was found" — never a panic.
+        let home = std::env::var_os("HOME");
+        let preferred = home
+            .as_ref()
+            .map(|h| Path::new(h).join(".cargo/bin/cargo"));
+        let found = find_cargo();
+
+        match (preferred, found) {
+            (Some(pref), Some(found)) if pref.exists() => {
+                assert_eq!(
+                    found, pref,
+                    "find_cargo must prefer ~/.cargo/bin/cargo when it exists"
+                );
+            }
+            (Some(pref), None) if pref.exists() => {
+                panic!("~/.cargo/bin/cargo exists but find_cargo returned None");
+            }
+            _ => {
+                // Either no HOME or no ~/.cargo/bin/cargo. Anything is fine
+                // here — we already exercise the negative path in the
+                // env_discovery_works test.
+            }
+        }
+    }
+
+    #[test]
+    fn project_runsible_toml_finds_workspace_root_from_subdir() {
+        // Create a fake project with a runsible.toml at the root and a
+        // nested subdirectory; discovery starting from the subdir must walk
+        // upward and find the root manifest.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("runsible.toml"),
+            "[package]\nname = \"x\"\nversion = \"0.0.1\"\n",
+        )
+        .unwrap();
+        let sub = root.join("subpkg/inner");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let found = crate::config::discover_project_runsible_toml(&sub);
+        assert_eq!(
+            found,
+            Some(root.join("runsible.toml")),
+            "discovery must walk up from subdir to the workspace root manifest"
+        );
+
+        // From a directory tree that has NO manifest anywhere upward, the
+        // discovery must stop without panicking. We can't guarantee that no
+        // ancestor has a runsible.toml on this box, so this branch only
+        // checks the function returns Option<PathBuf> cleanly.
+        let lonely = tempfile::tempdir().unwrap();
+        let _ = crate::config::discover_project_runsible_toml(lonely.path());
+    }
 }

@@ -161,6 +161,11 @@ heartbeat_path = "~/.local/state/runsible-pull/heartbeat.json"
 mod tests {
     use super::*;
 
+    /// Shared lock for tests that mutate `$HOME`. Env-var changes are
+    /// process-wide, so concurrent tests that all touch `HOME` clobber each
+    /// other; serialize them through this mutex.
+    static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn config_parse_minimal() {
         let body = r#"
@@ -186,6 +191,8 @@ heartbeat_path = "/var/lib/rp/heartbeat.json"
 
     #[test]
     fn home_expansion() {
+        let _guard = HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         // Force a known HOME for the duration of this test.
         let prev = std::env::var("HOME").ok();
         std::env::set_var("HOME", "/tmp/fake-home");
@@ -244,5 +251,67 @@ heartbeat_path = "/tmp/rp/heartbeat.json"
         let cfg = PullConfig::from_str(body).unwrap();
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, PullError::UnsupportedSourceKind(_)));
+    }
+
+    #[test]
+    fn config_missing_source_section_errors() {
+        // Schema-only style file: a comment (no [source] table). Must produce
+        // an InvalidConfigToml error since `source` is a required field.
+        let body = "# nothing real in here\n";
+        let err = PullConfig::from_str(body).unwrap_err();
+        match err {
+            PullError::InvalidConfigToml { path, .. } => {
+                assert_eq!(path, PathBuf::from("<inline>"));
+            }
+            other => panic!("expected InvalidConfigToml, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ssh_key_with_tilde_path_is_expanded() {
+        let _guard = HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let prev = std::env::var("HOME").ok();
+        std::env::set_var("HOME", "/tmp/fake-home-ssh");
+
+        let body = r#"
+[source]
+kind = "git"
+url = "https://example.com/ops/site.git"
+ssh_key = "~/.ssh/id_ed25519"
+
+[apply]
+playbook = "playbooks/site.toml"
+
+[paths]
+state_dir = "/var/lib/rp"
+heartbeat_path = "/var/lib/rp/heartbeat.json"
+"#;
+        let cfg = PullConfig::from_str(body).expect("parse");
+
+        if let Some(p) = prev {
+            std::env::set_var("HOME", p);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(
+            cfg.source.ssh_key,
+            Some(PathBuf::from("/tmp/fake-home-ssh/.ssh/id_ed25519"))
+        );
+    }
+
+    #[test]
+    fn init_default_writes_valid_toml() {
+        // Confirm the body parses, validates, and exposes the M0 invariants
+        // we ship as the starter file.
+        let s = init_default();
+        let cfg = PullConfig::from_str(&s).expect("init_default parses");
+        cfg.validate().expect("init_default validates");
+        assert_eq!(cfg.apply.playbook, PathBuf::from("playbooks/site.toml"));
+        assert_eq!(cfg.source.branch, "main");
+        // Comment header must mention `runsible-pull init` so operators can
+        // grep it.
+        assert!(s.contains("runsible-pull init"));
     }
 }

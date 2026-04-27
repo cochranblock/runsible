@@ -137,11 +137,65 @@ mod tests {
         assert_eq!((ok, changed, failed), (0, 0, 0));
     }
 
+    /// Shared lock for tests that mutate `$RUNSIBLE_PLAYBOOK_BIN`. Process-wide
+    /// env vars race across the rayon-style default test runner, so any test
+    /// that touches this variable must take the same lock for the duration.
+    static PLAYBOOK_BIN_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn resolve_playbook_bin_honors_env() {
+        let _guard = PLAYBOOK_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("RUNSIBLE_PLAYBOOK_BIN", "/some/where/runsible-playbook");
         let p = resolve_playbook_bin();
         assert_eq!(p, PathBuf::from("/some/where/runsible-playbook"));
         std::env::remove_var("RUNSIBLE_PLAYBOOK_BIN");
+    }
+
+    #[test]
+    fn run_playbook_with_nonexistent_env_binary_returns_apply_error() {
+        // Force the resolver to a path that cannot exist; spawn must fail and
+        // surface as PullError::Apply with a message naming the missing file.
+        let _guard = PLAYBOOK_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let prev = std::env::var("RUNSIBLE_PLAYBOOK_BIN").ok();
+        std::env::set_var(
+            "RUNSIBLE_PLAYBOOK_BIN",
+            "/nonexistent/bin/runsible-playbook-9f3c",
+        );
+
+        let cfg = crate::config::PullConfig {
+            source: crate::config::SourceConfig {
+                kind: "git".into(),
+                url: "file:///nope".into(),
+                branch: "main".into(),
+                ssh_key: None,
+            },
+            apply: crate::config::ApplyConfig {
+                playbook: PathBuf::from("site.toml"),
+                extra_vars: vec![],
+            },
+            paths: crate::config::PathsConfig {
+                state_dir: PathBuf::from("/tmp"),
+                heartbeat_path: PathBuf::from("/tmp/heartbeat.json"),
+            },
+        };
+
+        let err = run_playbook(&cfg, std::path::Path::new("/tmp"))
+            .expect_err("must fail on missing binary");
+        match err {
+            PullError::Apply(msg) => {
+                assert!(
+                    msg.contains("/nonexistent/bin/runsible-playbook-9f3c"),
+                    "Apply error should name the binary it tried; got: {msg}"
+                );
+            }
+            other => panic!("expected PullError::Apply, got {other:?}"),
+        }
+
+        // Restore prior env state.
+        match prev {
+            Some(p) => std::env::set_var("RUNSIBLE_PLAYBOOK_BIN", p),
+            None => std::env::remove_var("RUNSIBLE_PLAYBOOK_BIN"),
+        }
     }
 }

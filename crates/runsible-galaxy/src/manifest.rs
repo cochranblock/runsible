@@ -174,4 +174,88 @@ version = "0.1.0"
             "Expected error for missing package.name"
         );
     }
+
+    // ── New: deps and dev-deps round-trip through TOML ─────────────────────
+    #[test]
+    fn manifest_with_deps_and_dev_deps_roundtrip() {
+        let m = PackageManifest {
+            package: PackageMeta {
+                name: "myapp".to_string(),
+                version: "0.2.3".to_string(),
+                description: Some("test app".to_string()),
+                license: Some("MIT".to_string()),
+                authors: None,
+                repository: None,
+                keywords: None,
+                categories: None,
+                readme: None,
+                min_runsible_version: None,
+            },
+            dependencies: {
+                let mut d = IndexMap::new();
+                d.insert("nginx".to_string(), "^1.2".to_string());
+                d.insert("postgres".to_string(), "=2.0.0".to_string());
+                d
+            },
+            dev_dependencies: {
+                let mut d = IndexMap::new();
+                d.insert("test_helper".to_string(), "^0.1".to_string());
+                d
+            },
+            entry_points: vec![],
+        };
+
+        let serialized = toml::to_string_pretty(&m).expect("serialize");
+        let parsed = PackageManifest::from_str(&serialized).expect("re-parse");
+        assert_eq!(parsed.package.name, "myapp");
+        assert_eq!(parsed.dependencies.len(), 2);
+        assert_eq!(parsed.dev_dependencies.len(), 1);
+        assert_eq!(
+            parsed.dependencies.get("nginx").map(String::as_str),
+            Some("^1.2")
+        );
+        assert_eq!(
+            parsed.dev_dependencies.get("test_helper").map(String::as_str),
+            Some("^0.1")
+        );
+    }
+
+    // ── New: author list (Vec<String>) parses ──────────────────────────────
+    #[test]
+    fn manifest_with_author_list_parses() {
+        let toml_str = r#"
+[package]
+name = "team_pkg"
+version = "1.0.0"
+authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
+"#;
+        let m = PackageManifest::from_str(toml_str).expect("should parse");
+        let authors = m.package.authors.as_ref().expect("authors set");
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors[0], "Alice <a@example.com>");
+        assert_eq!(authors[1], "Bob <b@example.com>");
+    }
+
+    // ── New: name with capital letters fails validation ────────────────────
+    // Locks current behavior: validate() rejects names not matching [a-z][a-z0-9_-]*.
+    #[test]
+    fn manifest_with_caps_in_name_errors() {
+        let toml_str = r#"
+[package]
+name = "Name-With-Caps"
+version = "0.1.0"
+"#;
+        let result = PackageManifest::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "Expected validation error for capitalized name; got: {:?}",
+            result
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("lowercase") || msg.contains("invalid"),
+            "Error message should mention lowercase/invalid: {}",
+            msg
+        );
+    }
 }

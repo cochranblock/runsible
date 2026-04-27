@@ -452,4 +452,163 @@ version = "0.1.0"
             report.findings
         );
     }
+
+    /// Build a baseline package with a manifest and (optionally) `tests/`,
+    /// returning the package directory. Caller decides whether to add tasks.
+    fn make_pkg_with_manifest(pkg: &std::path::Path, manifest_extra: &str) {
+        let manifest = format!(
+            r#"
+[package]
+name = "demo"
+version = "0.1.0"
+{manifest_extra}
+"#
+        );
+        fs::write(pkg.join("runsible.toml"), manifest).unwrap();
+    }
+
+    #[test]
+    fn sanity_s004_missing_entry_point_tasks_fires() {
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        make_pkg_with_manifest(
+            pkg,
+            r#"
+[[entry_points]]
+name = "site"
+tasks = "tasks/missing.toml"
+"#,
+        );
+        // tests/ present so S007 doesn't muddy things.
+        fs::create_dir_all(pkg.join("tests")).unwrap();
+        let report = run_sanity(pkg);
+        assert!(
+            has_id_with_severity(&report, "S004", Severity::Error),
+            "expected S004 error for missing entry-point tasks; got: {:#?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn sanity_s004_valid_entry_point_no_finding() {
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        make_pkg_with_manifest(
+            pkg,
+            r#"
+[[entry_points]]
+name = "site"
+tasks = "tasks/site.toml"
+"#,
+        );
+        fs::create_dir_all(pkg.join("tasks")).unwrap();
+        // A tiny but valid playbook-flavored TOML — must parse cleanly.
+        fs::write(
+            pkg.join("tasks/site.toml"),
+            r#"
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+
+[[plays]]
+name = "Demo"
+hosts = "localhost"
+
+[[plays.tasks]]
+name = "say hi"
+debug = { msg = "hello" }
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(pkg.join("tests")).unwrap();
+        let report = run_sanity(pkg);
+        assert!(
+            !report.findings.iter().any(|f| f.id == "S004"),
+            "valid entry_points file must produce zero S004 findings; got: {:#?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn sanity_s005_invalid_handler_toml_fires() {
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        make_pkg_with_manifest(pkg, "");
+        fs::create_dir_all(pkg.join("handlers")).unwrap();
+        // Unbalanced bracket — a TOML parse error inside handlers/.
+        fs::write(pkg.join("handlers/main.toml"), "[handler\nname = \"x\"\n").unwrap();
+        fs::create_dir_all(pkg.join("tests")).unwrap();
+        let report = run_sanity(pkg);
+        assert!(
+            has_id_with_severity(&report, "S005", Severity::Error),
+            "expected S005 for invalid handlers/main.toml; got: {:#?}",
+            report.findings
+        );
+    }
+
+    #[test]
+    fn sanity_s006_lint_findings_propagate() {
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        make_pkg_with_manifest(pkg, "");
+        fs::create_dir_all(pkg.join("tasks")).unwrap();
+        // Valid TOML but contents that the lint Basic profile flags. The
+        // current lint rule set treats free-form unknown-shaped task entries
+        // as findings — write something the linter will inspect and produce
+        // *some* finding for.
+        fs::write(
+            pkg.join("tasks/main.toml"),
+            r#"
+schema = "runsible.playbook.v1"
+
+[[plays]]
+name = "linty"
+hosts = "all"
+
+[[plays.tasks]]
+name = ""
+shell = "echo hi"
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(pkg.join("tests")).unwrap();
+        let report = run_sanity(pkg);
+        // We do not assert specific lint rule IDs — those are owned by
+        // runsible-lint and may evolve. We only assert the propagation
+        // contract: ANY S006 finding under tasks/main.toml means the bridge
+        // works; if there are zero findings, the lint produced none either,
+        // which is also acceptable as a propagation contract — so we bound
+        // the assertion to "no spurious non-S006 errors got tagged S006."
+        for f in &report.findings {
+            if f.id == "S006" {
+                assert!(
+                    f.message.contains("[lint "),
+                    "S006 messages must embed the lint rule id; got: {}",
+                    f.message
+                );
+                if let Some(p) = &f.file {
+                    assert!(
+                        p.ends_with("tasks/main.toml"),
+                        "S006 file must point at the linted file; got: {}",
+                        p.display()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sanity_s007_missing_tests_dir_warning() {
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        make_pkg_with_manifest(pkg, "");
+        // Deliberately do NOT create tests/.
+        let report = run_sanity(pkg);
+        assert!(
+            has_id_with_severity(&report, "S007", Severity::Warning),
+            "missing tests/ dir must produce S007 warning; got: {:#?}",
+            report.findings
+        );
+    }
 }

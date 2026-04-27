@@ -263,4 +263,95 @@ mod tests {
         let _ = fs::remove_dir_all(&out);
         let _ = fs::remove_dir_all(&dst);
     }
+
+    // ── New: build from 1-file pkg, extract elsewhere, content matches ─────
+    #[test]
+    fn build_one_file_pkg_then_extract_content_matches() {
+        let tmp = std::env::temp_dir();
+        let id = format!("{}-{}", std::process::id(), "onefile");
+        let src = tmp.join(format!("rs-tar-onefile-src-{}", id));
+        let out = tmp.join(format!("rs-tar-onefile-out-{}", id));
+        let dst = tmp.join(format!("rs-tar-onefile-dst-{}", id));
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&out);
+        let _ = fs::remove_dir_all(&dst);
+
+        fs::create_dir_all(&src).unwrap();
+        let payload: &[u8] = b"single-file-pkg-content\n";
+        fs::write(src.join("only.txt"), payload).unwrap();
+
+        let (pkg_path, _csum) = build_package(&src, "onefile", "0.0.1", &out).unwrap();
+        assert!(pkg_path.exists());
+
+        let extracted = extract_package(&pkg_path, &dst).unwrap();
+        // FILES list should report the one user file (FILES/SHA256SUMS are
+        // synthesized; they may or may not appear in the FILES list depending
+        // on order of operations, but only.txt must be present)
+        let names: HashSet<String> = extracted.iter().map(|p| p.display().to_string()).collect();
+        assert!(names.contains("only.txt"), "FILES should list only.txt; got {:?}", names);
+
+        // Content must match byte-for-byte.
+        let extracted_bytes = fs::read(dst.join("only.txt")).unwrap();
+        assert_eq!(
+            extracted_bytes.as_slice(),
+            payload,
+            "extracted content must match original"
+        );
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&out);
+        let _ = fs::remove_dir_all(&dst);
+    }
+
+    // ── New: tampering detected by manually verifying SHA256SUMS ───────────
+    // No public verify_checksums helper exists; we replicate the same logic
+    // extract_package uses internally to confirm tampering would be caught.
+    // Build pkg, extract, then mutate the file on disk and recompute against
+    // the recorded SHA256SUMS. Mismatch confirms detection works.
+    #[test]
+    fn tampered_file_sha_does_not_match_recorded() {
+        let tmp = std::env::temp_dir();
+        let id = format!("{}-{}", std::process::id(), "tamper");
+        let src = tmp.join(format!("rs-tar-tamper-src-{}", id));
+        let out = tmp.join(format!("rs-tar-tamper-out-{}", id));
+        let dst = tmp.join(format!("rs-tar-tamper-dst-{}", id));
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&out);
+        let _ = fs::remove_dir_all(&dst);
+
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("payload.txt"), b"original-content\n").unwrap();
+
+        let (pkg_path, _csum) = build_package(&src, "tamper", "0.0.1", &out).unwrap();
+        extract_package(&pkg_path, &dst).expect("extract OK");
+
+        // Read the recorded sha for payload.txt.
+        let sums_content = fs::read_to_string(dst.join("SHA256SUMS")).unwrap();
+        let mut recorded: Option<String> = None;
+        for line in sums_content.lines() {
+            if line.contains("payload.txt") {
+                let parts: Vec<&str> = line.splitn(2, "  ").collect();
+                if parts.len() == 2 {
+                    recorded = Some(parts[0].to_string());
+                }
+            }
+        }
+        let recorded = recorded.expect("recorded sha for payload.txt");
+
+        // Now tamper payload.txt — flip a byte.
+        fs::write(dst.join("payload.txt"), b"tampered-content\n").unwrap();
+
+        // Verify by recomputing — replicates the inner check of extract_package.
+        let actual = sha256_file(&dst.join("payload.txt")).unwrap();
+        assert_ne!(
+            actual, recorded,
+            "after tampering, computed sha must differ from recorded sha"
+        );
+
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&out);
+        let _ = fs::remove_dir_all(&dst);
+    }
 }

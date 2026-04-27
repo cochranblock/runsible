@@ -132,3 +132,59 @@ pub enum VaultError {
     #[error("unsupported vault envelope version: {0}")]
     UnsupportedVersion(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_error_variant_displays_non_empty_message() {
+        // Build a representative value for every Error variant and verify Display
+        // produces a non-empty string.
+        let cases: Vec<Error> = vec![
+            Error::Config(ConfigError::NotFound),
+            Error::Parse(ParseError::MissingField("name".into())),
+            Error::Type(TypeError::UndeclaredTag("foo".into())),
+            Error::Plan(PlanError::Synthesis {
+                module: "m".into(),
+                message: "x".into(),
+            }),
+            Error::Apply(ApplyError::VerifyNonEmpty),
+            Error::Connection(ConnectionError::Unreachable {
+                host: "h".into(),
+                message: "no route".into(),
+            }),
+            Error::Vault(VaultError::NoRecipientMatch),
+            Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+        ];
+        for e in cases {
+            let s = e.to_string();
+            assert!(!s.is_empty(), "Display must produce text for {e:?}");
+        }
+    }
+
+    #[test]
+    fn world_writable_display_contains_path() {
+        let p = PathBuf::from("/etc/runsible.toml");
+        let err = ConfigError::WorldWritable { path: p.clone() };
+        let s = err.to_string();
+        assert!(
+            s.contains("/etc/runsible.toml"),
+            "world-writable Display must mention the path; got: {s}"
+        );
+        assert!(
+            s.contains("world-writable"),
+            "Display must mention world-writable; got: {s}"
+        );
+    }
+
+    #[test]
+    fn unsupported_schema_version_display_includes_versions() {
+        let err = ConfigError::UnsupportedSchemaVersion {
+            found: 9,
+            required: 1,
+        };
+        let s = err.to_string();
+        assert!(s.contains('9') && s.contains('1'), "got: {s}");
+    }
+}

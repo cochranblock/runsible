@@ -184,6 +184,87 @@ mod tests {
         assert!(names.contains(&"common"), "common should be resolved");
     }
 
+    // ── New: single dep with no transitives resolves to 1 package ──────────
+    #[test]
+    fn resolve_single_no_transitives() {
+        let registry = RegistryIndex::from_json(
+            r#"
+{
+  "packages": [
+    { "name": "solo", "version": "1.0.0", "checksum": "sha256:s1", "deps": {} }
+  ]
+}
+"#,
+        )
+        .unwrap();
+
+        let mut deps = IndexMap::new();
+        deps.insert("solo".to_string(), "^1".to_string());
+
+        let result = resolve_deps(&deps, &registry, "file:///tmp/r").unwrap();
+        assert_eq!(result.len(), 1, "expected exactly 1 resolved pkg");
+        assert_eq!(result[0].name, "solo");
+        assert_eq!(result[0].version.to_string(), "1.0.0");
+    }
+
+    // ── New: diamond dependency resolves D once ────────────────────────────
+    // A → B, A → C, B → D, C → D
+    #[test]
+    fn resolve_diamond_deduplicates() {
+        let registry = RegistryIndex::from_json(
+            r#"
+{
+  "packages": [
+    { "name": "a", "version": "1.0.0", "checksum": "sha256:a", "deps": { "b": "^1", "c": "^1" } },
+    { "name": "b", "version": "1.0.0", "checksum": "sha256:b", "deps": { "d": "^1" } },
+    { "name": "c", "version": "1.0.0", "checksum": "sha256:c", "deps": { "d": "^1" } },
+    { "name": "d", "version": "1.0.0", "checksum": "sha256:d", "deps": {} }
+  ]
+}
+"#,
+        )
+        .unwrap();
+
+        let mut deps = IndexMap::new();
+        deps.insert("a".to_string(), "^1".to_string());
+
+        let result = resolve_deps(&deps, &registry, "file:///tmp/r").unwrap();
+        let names: Vec<&str> = result.iter().map(|r| r.name.as_str()).collect();
+        let d_count = names.iter().filter(|n| **n == "d").count();
+        assert_eq!(d_count, 1, "D should appear exactly once in diamond, got {:?}", names);
+        assert_eq!(result.len(), 4, "diamond should yield 4 unique packages");
+    }
+
+    // ── New: ^1 matches 1.5.0 but not 2.0.0 (chooses latest matching) ──────
+    #[test]
+    fn caret_one_matches_latest_one_x() {
+        let registry = RegistryIndex::from_json(
+            r#"
+{
+  "packages": [
+    { "name": "lib", "version": "1.0.0", "checksum": "sha256:l1", "deps": {} },
+    { "name": "lib", "version": "1.5.0", "checksum": "sha256:l15", "deps": {} },
+    { "name": "lib", "version": "2.0.0", "checksum": "sha256:l2", "deps": {} }
+  ]
+}
+"#,
+        )
+        .unwrap();
+
+        let mut deps = IndexMap::new();
+        deps.insert("lib".to_string(), "^1".to_string());
+
+        let result = resolve_deps(&deps, &registry, "file:///tmp/r").unwrap();
+        assert_eq!(result.len(), 1);
+        // Should pick the latest 1.x — 1.5.0 — and never 2.0.0.
+        assert_eq!(
+            result[0].version.to_string(),
+            "1.5.0",
+            "^1 should pick the highest 1.x — found {}",
+            result[0].version
+        );
+    }
+
     #[test]
     fn conflict_detection() {
         // Build a registry where pkgA requires lib >=2.0 and pkgB requires lib <2.0

@@ -130,4 +130,53 @@ mod tests {
         assert_eq!(report.passed, 0);
         assert_eq!(report.failed, 0);
     }
+
+    #[test]
+    fn units_with_zero_test_crate_records_one_passed_zero_failed() {
+        // Skip if cargo isn't reachable — units.rs can't run without it.
+        if env::find_cargo().is_none() {
+            eprintln!("skipping units_with_zero_test_crate: no cargo available");
+            return;
+        }
+
+        let dir = TempDir::new().unwrap();
+        let pkg = dir.path();
+        let crate_dir = pkg.join("crates/null-mod");
+        std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+        std::fs::write(
+            crate_dir.join("Cargo.toml"),
+            r#"[package]
+name = "null-mod"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+"#,
+        )
+        .unwrap();
+        // No `#[test]` functions at all — `cargo test` should exit 0 with
+        // zero tests run.
+        std::fs::write(crate_dir.join("src/lib.rs"), "//! empty crate\n").unwrap();
+
+        let report = run_units(pkg);
+        assert!(
+            report.skipped_reason.is_none(),
+            "report must not be skipped when crates/ exists; got: {:?}",
+            report
+        );
+        assert!(
+            !report.crates_tested.is_empty(),
+            "at least one crate must be tested; got: {:?}",
+            report.crates_tested
+        );
+        assert!(
+            report.crates_tested.iter().any(|c| c == "null-mod"),
+            "crates_tested must list null-mod; got: {:?}",
+            report.crates_tested
+        );
+        assert_eq!(report.failed, 0, "no failures expected; got: {:?}", report);
+    }
 }

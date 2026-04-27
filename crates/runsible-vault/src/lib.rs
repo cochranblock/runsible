@@ -131,4 +131,56 @@ mod tests {
         let plaintext = decrypt_bytes(&ct_bytes, &identities).expect("decrypt");
         assert_eq!(plaintext, b"secret");
     }
+
+    /// `encrypt_string("hello", &[recipient])` returns valid TOML that parses
+    /// to a table with `vault = "v1"`, `recipients`, and `ciphertext`.
+    #[test]
+    fn encrypt_string_returns_valid_v1_table() {
+        let (_identity, recipient) = keygen();
+        let public_str = recipient.to_string();
+
+        let snippet = encrypt_string("hello", &[public_str.clone()]).expect("encrypt_string");
+
+        let full_toml = format!("val = {snippet}\n");
+        let parsed: toml::Value = toml::from_str(&full_toml).expect("toml parse");
+        let table = parsed["val"].as_table().expect("val is a table");
+
+        assert_eq!(table["vault"].as_str(), Some("v1"));
+        let recipients = table["recipients"].as_array().expect("recipients array");
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].as_str(), Some(public_str.as_str()));
+        assert!(table["ciphertext"].as_str().is_some(), "ciphertext field exists");
+    }
+
+    /// The ciphertext field must be base64 (only contains base64 alphabet + whitespace).
+    #[test]
+    fn encrypt_string_ciphertext_is_base64() {
+        let (_identity, recipient) = keygen();
+        let snippet = encrypt_string("hello", &[recipient.to_string()]).expect("encrypt_string");
+
+        let full_toml = format!("val = {snippet}\n");
+        let parsed: toml::Value = toml::from_str(&full_toml).expect("toml parse");
+        let ct = parsed["val"]["ciphertext"]
+            .as_str()
+            .expect("ciphertext field");
+
+        assert!(!ct.is_empty(), "ciphertext must not be empty");
+        for c in ct.chars() {
+            // Match: ^[A-Za-z0-9+/=\s]+$
+            assert!(
+                c.is_ascii_alphanumeric()
+                    || c == '+'
+                    || c == '/'
+                    || c == '='
+                    || c.is_ascii_whitespace(),
+                "non-base64 char in ciphertext: {c:?}"
+            );
+        }
+
+        // And it must round-trip through base64 decode (sanity check).
+        assert!(
+            B64.decode(ct).is_ok(),
+            "ciphertext must decode as base64"
+        );
+    }
 }

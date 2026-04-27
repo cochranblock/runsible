@@ -244,4 +244,128 @@ y = 2
             "expected error to mention 'undefined', got: {msg}"
         );
     }
+
+    #[test]
+    fn render_int_var() {
+        let t = Templater::new();
+        let vars = vars_from_toml("port = 8080");
+        let out = t.render_str("{{ port }}", &vars).unwrap();
+        assert_eq!(out, "8080");
+    }
+
+    #[test]
+    fn render_bool_var() {
+        let t = Templater::new();
+        let vars = vars_from_toml("enabled = true");
+        let out = t.render_str("{{ enabled }}", &vars).unwrap();
+        assert_eq!(out, "true");
+    }
+
+    #[test]
+    fn render_float_var() {
+        let t = Templater::new();
+        let vars = vars_from_toml("ratio = 1.5");
+        let out = t.render_str("{{ ratio }}", &vars).unwrap();
+        assert!(out.starts_with("1.5"));
+    }
+
+    #[test]
+    fn render_nested_table_access() {
+        let t = Templater::new();
+        let vars = vars_from_toml(
+            r#"
+[user]
+name = "alice"
+age = 30
+"#,
+        );
+        let out = t.render_str("{{ user.name }}", &vars).unwrap();
+        assert_eq!(out, "alice");
+    }
+
+    #[test]
+    fn render_array_index() {
+        let t = Templater::new();
+        let vars = vars_from_toml(r#"items = ["a", "b", "c"]"#);
+        let out = t.render_str("{{ items[0] }}", &vars).unwrap();
+        assert_eq!(out, "a");
+        let out2 = t.render_str("{{ items[2] }}", &vars).unwrap();
+        assert_eq!(out2, "c");
+    }
+
+    #[test]
+    fn render_default_filter() {
+        let t = Templater::new();
+        let vars = Vars::new();
+        let out = t
+            .render_str("{{ missing | default('x') }}", &vars)
+            .unwrap();
+        assert_eq!(out, "x");
+    }
+
+    #[test]
+    fn render_length_filter_on_array() {
+        let t = Templater::new();
+        let vars = vars_from_toml(r#"items = ["a", "b", "c"]"#);
+        let out = t.render_str("{{ items | length }}", &vars).unwrap();
+        assert_eq!(out, "3");
+    }
+
+    #[test]
+    fn render_upper_filter() {
+        let t = Templater::new();
+        let vars = vars_from_toml(r#"who = "alice""#);
+        let out = t.render_str("{{ who | upper }}", &vars).unwrap();
+        assert_eq!(out, "ALICE");
+    }
+
+    #[test]
+    fn render_lower_filter() {
+        let t = Templater::new();
+        let vars = vars_from_toml(r#"who = "ALICE""#);
+        let out = t.render_str("{{ who | lower }}", &vars).unwrap();
+        assert_eq!(out, "alice");
+    }
+
+    #[test]
+    fn eval_bool_parenthesized() {
+        let t = Templater::new();
+        let vars = vars_from_toml(
+            r#"
+a = 1
+b = 2
+c = 3
+"#,
+        );
+        assert!(t.eval_bool("(a == 1 and b == 2) or c == 99", &vars).unwrap());
+        assert!(t.eval_bool("a == 1 and (b == 2 or c == 99)", &vars).unwrap());
+    }
+
+    #[test]
+    fn eval_bool_not_operator() {
+        let t = Templater::new();
+        let vars = vars_from_toml("x = 5");
+        assert!(t.eval_bool("not (x == 1)", &vars).unwrap());
+        assert!(!t.eval_bool("not (x == 5)", &vars).unwrap());
+    }
+
+    #[test]
+    fn render_value_array_of_templates() {
+        let t = Templater::new();
+        let vars = vars_from_toml(
+            r#"
+a = "first"
+b = "second"
+"#,
+        );
+        let raw: toml::Value =
+            toml::Value::Array(vec![
+                toml::Value::String("{{ a }}".into()),
+                toml::Value::String("{{ b }}".into()),
+            ]);
+        let rendered = t.render_value(&raw, &vars).unwrap();
+        let arr = rendered.as_array().unwrap();
+        assert_eq!(arr[0].as_str().unwrap(), "first");
+        assert_eq!(arr[1].as_str().unwrap(), "second");
+    }
 }

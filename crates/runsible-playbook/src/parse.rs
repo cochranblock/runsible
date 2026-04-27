@@ -170,3 +170,115 @@ pub fn resolve_handler(
     }
     Ok(t)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_playbook_has_zero_plays() {
+        let pb = parse_playbook("").unwrap();
+        assert_eq!(pb.plays.len(), 0);
+    }
+
+    #[test]
+    fn when_string_shorthand_resolves_to_expr() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "shorthand"
+when = "x == 1"
+debug = { msg = "hi" }
+"#,
+        )
+        .unwrap();
+        let imports = IndexMap::new();
+        let task = resolve_task(&raw, &imports).unwrap();
+        assert_eq!(task.when.as_deref(), Some("x == 1"));
+    }
+
+    #[test]
+    fn task_with_register_and_when() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "both"
+register = "out"
+when = { expr = "ready" }
+debug = { msg = "hi" }
+"#,
+        )
+        .unwrap();
+        let imports = IndexMap::new();
+        let task = resolve_task(&raw, &imports).unwrap();
+        assert_eq!(task.register.as_deref(), Some("out"));
+        assert_eq!(task.when.as_deref(), Some("ready"));
+    }
+
+    #[test]
+    fn missing_module_with_no_block_errors() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "no module"
+"#,
+        )
+        .unwrap();
+        let imports = IndexMap::new();
+        let err = resolve_task(&raw, &imports).unwrap_err();
+        assert!(matches!(err, PlaybookError::TypeCheck(_)));
+    }
+
+    #[test]
+    fn notify_array_parses_two_handlers() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "notify two"
+notify = ["a", "b"]
+debug = { msg = "x" }
+"#,
+        )
+        .unwrap();
+        let imports = IndexMap::new();
+        let task = resolve_task(&raw, &imports).unwrap();
+        assert_eq!(task.notify.len(), 2);
+        assert_eq!(task.notify[0], "a");
+        assert_eq!(task.notify[1], "b");
+    }
+
+    #[test]
+    fn loop_control_renames_loop_var() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "loop"
+loop = ["x", "y"]
+loop_control = { loop_var = "i" }
+debug = { msg = "{{ i }}" }
+"#,
+        )
+        .unwrap();
+        let imports = IndexMap::new();
+        let task = resolve_task(&raw, &imports).unwrap();
+        assert_eq!(task.loop_var, "i");
+    }
+
+    #[test]
+    fn resolve_handler_uses_id_as_name_when_unnamed() {
+        let raw: toml::Value = toml::from_str(r#"debug = { msg = "fire" }"#).unwrap();
+        let imports = IndexMap::new();
+        let h = resolve_handler("restart_app", &raw, &imports).unwrap();
+        assert_eq!(h.name.as_deref(), Some("restart_app"));
+    }
+
+    #[test]
+    fn imports_alias_resolved_to_fq_name() {
+        let raw: toml::Value = toml::from_str(
+            r#"
+name = "aliased"
+dbg = { msg = "hi" }
+"#,
+        )
+        .unwrap();
+        let mut imports = IndexMap::new();
+        imports.insert("dbg".to_string(), "runsible_builtin.debug".to_string());
+        let task = resolve_task(&raw, &imports).unwrap();
+        assert_eq!(task.module_name, "runsible_builtin.debug");
+    }
+}

@@ -287,9 +287,23 @@ pub fn parse_inventory(src: &str) -> Result<Inventory> {
     }
 
     // -----------------------------------------------------------------------
-    // Post-processing: populate host.groups and ensure `all` contains every
-    // host, `ungrouped` contains hosts not in any named group.
+    // Post-processing: validate child references, populate host.groups, and
+    // ensure `all` contains every host while `ungrouped` collects hosts that
+    // are not in any named group.
     // -----------------------------------------------------------------------
+
+    // Validate that every `children = [...]` entry references a known group.
+    let known_groups: std::collections::HashSet<String> = inv.groups.keys().cloned().collect();
+    for (parent, gentry) in &inv.groups {
+        for child in &gentry.children {
+            if !known_groups.contains(child) {
+                return Err(InventoryError::UnknownChild {
+                    child: child.clone(),
+                    parent: parent.clone(),
+                });
+            }
+        }
+    }
 
     // Collect each host's group memberships (direct, not transitive).
     let group_names: Vec<String> = inv.groups.keys().cloned().collect();
@@ -782,5 +796,329 @@ http_port = 8080
         let p = parse_pattern("all:!webservers").unwrap();
         let result = hosts_matching(&inv, &p);
         assert_eq!(result, vec!["db01", "db02"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Range expansion — extended coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn range_no_brackets_passthrough() {
+        let result = expand_range("web").unwrap();
+        assert_eq!(result, vec!["web"]);
+    }
+
+    #[test]
+    fn range_single_element_padded() {
+        let result = expand_range("web[01:01]").unwrap();
+        assert_eq!(result, vec!["web01"]);
+    }
+
+    #[test]
+    fn range_no_padding_when_unpadded() {
+        let result = expand_range("web[1:3]").unwrap();
+        assert_eq!(result, vec!["web1", "web2", "web3"]);
+    }
+
+    #[test]
+    fn range_three_digit_padding_preserved() {
+        let result = expand_range("web[001:003]").unwrap();
+        assert_eq!(result, vec!["web001", "web002", "web003"]);
+    }
+
+    #[test]
+    fn range_uppercase_alpha() {
+        let result = expand_range("redis-[A:C]").unwrap();
+        assert_eq!(result, vec!["redis-A", "redis-B", "redis-C"]);
+    }
+
+    #[test]
+    fn range_mixed_case_alpha_invalid() {
+        // 'a' (97) > 'Z' (90) so this fails the descending-range guard.
+        let err = expand_range("bad[a:Z]").unwrap_err();
+        assert!(
+            matches!(err, InventoryError::BadRange { .. }),
+            "expected BadRange, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn range_descending_numeric_invalid() {
+        let err = expand_range("nope[3:1]").unwrap_err();
+        assert!(
+            matches!(err, InventoryError::BadRange { .. }),
+            "expected BadRange, got {err:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Inventory parse — extended coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_empty_string() {
+        let inv = parse_inventory("").unwrap();
+        assert_eq!(inv.hosts.len(), 0);
+        assert!(inv.groups.contains_key("all"));
+        assert!(inv.groups.contains_key("ungrouped"));
+    }
+
+    #[test]
+    fn parse_only_all_vars() {
+        let src = r#"
+[all.vars]
+foo = "bar"
+ntp_pool = "pool.ntp.org"
+"#;
+        let inv = parse_inventory(src).unwrap();
+        assert_eq!(inv.hosts.len(), 0);
+        let all = inv.groups.get("all").expect("all group present");
+        assert_eq!(all.vars.len(), 2);
+        assert_eq!(
+            all.vars.get("foo").and_then(|v| v.as_str()),
+            Some("bar")
+        );
+    }
+
+    #[test]
+    fn parse_unknown_child_errors() {
+        let src = r#"
+[webservers.hosts]
+web01 = {}
+
+[prod]
+children = ["nonexistent"]
+"#;
+        let err = parse_inventory(src).unwrap_err();
+        match err {
+            InventoryError::UnknownChild { child, parent } => {
+                assert_eq!(child, "nonexistent");
+                assert_eq!(parent, "prod");
+            }
+            other => panic!("expected UnknownChild, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_host_in_two_groups_merges_vars() {
+        let src = r#"
+[group1.hosts]
+shared01 = { port = 80 }
+
+[group2.hosts]
+shared01 = { proto = "http" }
+"#;
+        let inv = parse_inventory(src).unwrap();
+        let host = inv.hosts.get("shared01").expect("shared01 present");
+        assert_eq!(
+            host.vars.get("port").and_then(|v| v.as_integer()),
+            Some(80)
+        );
+        assert_eq!(
+            host.vars.get("proto").and_then(|v| v.as_str()),
+            Some("http")
+        );
+        // Should be a member of both named groups.
+        assert!(host.groups.contains(&"group1".to_string()));
+        assert!(host.groups.contains(&"group2".to_string()));
+    }
+
+    // -----------------------------------------------------------------------
+    // Pattern matching — extended coverage with shared fixture
+    // -----------------------------------------------------------------------
+
+    fn fixture() -> Inventory {
+        parse_inventory(
+            r#"
+[all.hosts]
+web01 = {}
+web02 = {}
+db01 = {}
+db02 = {}
+
+[webservers.hosts]
+web01 = {}
+web02 = {}
+
+[databases.hosts]
+db01 = {}
+db02 = {}
+
+[prod]
+children = ["webservers", "databases"]
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn pattern_all_keyword() {
+        let inv = fixture();
+        let p = parse_pattern("all").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["db01", "db02", "web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_group_name_exact() {
+        let inv = fixture();
+        let p = parse_pattern("webservers").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_glob_web_star() {
+        let inv = fixture();
+        let p = parse_pattern("web*").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_regex_anchored_class() {
+        let inv = fixture();
+        let p = parse_pattern("~web0[12]").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_intersection_prod_and_webservers() {
+        let inv = fixture();
+        let p = parse_pattern("prod:&webservers").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_exclusion_all_minus_databases() {
+        let inv = fixture();
+        let p = parse_pattern("all:!databases").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["web01", "web02"]);
+    }
+
+    #[test]
+    fn pattern_comma_separated_union() {
+        let inv = fixture();
+        let p = parse_pattern("web01,db01").unwrap();
+        let result = hosts_matching(&inv, &p);
+        assert_eq!(result, vec!["db01", "web01"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // JSON emitters
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn json_list_meta_hostvars_per_host() {
+        let inv = make_test_inv();
+        let json = to_ansible_list_json(&inv);
+        let hostvars = json
+            .get("_meta")
+            .and_then(|m| m.get("hostvars"))
+            .and_then(|h| h.as_object())
+            .expect("_meta.hostvars present");
+
+        // Every host in the inventory should appear in hostvars.
+        for host in inv.hosts.keys() {
+            assert!(
+                hostvars.contains_key(host),
+                "hostvars missing entry for {host}"
+            );
+        }
+        assert_eq!(hostvars.len(), inv.hosts.len());
+    }
+
+    #[test]
+    fn json_list_group_has_hosts_and_vars() {
+        let inv = make_test_inv();
+        let json = to_ansible_list_json(&inv);
+        let webservers = json
+            .get("webservers")
+            .and_then(|g| g.as_object())
+            .expect("webservers group in output");
+
+        let hosts = webservers
+            .get("hosts")
+            .and_then(|h| h.as_array())
+            .expect("webservers.hosts array");
+        let host_strs: Vec<&str> = hosts.iter().filter_map(|v| v.as_str()).collect();
+        assert!(host_strs.contains(&"web01"));
+        assert!(host_strs.contains(&"web02"));
+        assert!(host_strs.contains(&"web03"));
+
+        let vars = webservers
+            .get("vars")
+            .and_then(|v| v.as_object())
+            .expect("webservers.vars object");
+        assert_eq!(vars.get("http_port").and_then(|v| v.as_i64()), Some(8080));
+    }
+
+    #[test]
+    fn json_host_returns_merged_vars() {
+        let inv = make_test_inv();
+        let json = to_ansible_host_json(&inv, "web01");
+        let obj = json.as_object().expect("host json is object");
+        // `all.vars` flows through merge.
+        assert_eq!(
+            obj.get("ntp_pool").and_then(|v| v.as_str()),
+            Some("pool.ntp.org")
+        );
+        // `webservers.vars` flows through merge for a webservers member.
+        assert_eq!(obj.get("http_port").and_then(|v| v.as_i64()), Some(8080));
+    }
+
+    // -----------------------------------------------------------------------
+    // merge_inventories
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn merge_non_overlapping_inventories() {
+        let a = parse_inventory(
+            r#"
+[webservers.hosts]
+web01 = {}
+"#,
+        )
+        .unwrap();
+        let b = parse_inventory(
+            r#"
+[databases.hosts]
+db01 = {}
+"#,
+        )
+        .unwrap();
+        let merged = merge_inventories(a, b).unwrap();
+        assert!(merged.hosts.contains_key("web01"));
+        assert!(merged.hosts.contains_key("db01"));
+        assert!(merged.groups.contains_key("webservers"));
+        assert!(merged.groups.contains_key("databases"));
+    }
+
+    #[test]
+    fn merge_conflicting_groups_errors() {
+        let a = parse_inventory(
+            r#"
+[webservers.hosts]
+web01 = {}
+"#,
+        )
+        .unwrap();
+        let b = parse_inventory(
+            r#"
+[webservers.hosts]
+web02 = {}
+"#,
+        )
+        .unwrap();
+        let err = merge_inventories(a, b).unwrap_err();
+        match err {
+            InventoryError::MergeConflictGroup { group } => {
+                assert_eq!(group, "webservers");
+            }
+            other => panic!("expected MergeConflictGroup, got {other:?}"),
+        }
     }
 }

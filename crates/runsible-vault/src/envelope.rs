@@ -137,4 +137,75 @@ mod tests {
         let result = parse_envelope(bad);
         assert!(result.is_err());
     }
+
+    /// A bare string with no header structure must fail with InvalidHeader.
+    #[test]
+    fn envelope_rejects_garbage_input() {
+        let result = parse_envelope("not a vault file");
+        assert!(result.is_err(), "garbage input must error");
+        let err = result.unwrap_err();
+        match err {
+            VaultError::InvalidHeader(_) => {}
+            other => panic!("expected InvalidHeader, got: {other:?}"),
+        }
+    }
+
+    /// Magic correct but version is unsupported (e.g. 99).
+    #[test]
+    fn envelope_rejects_wrong_version() {
+        let bad = "$RUNSIBLE_VAULT;99;CHACHA20-POLY1305;AGE;1\naGVsbG8=\n";
+        let result = parse_envelope(bad);
+        assert!(result.is_err(), "version 99 must be rejected");
+        let err = result.unwrap_err();
+        match err {
+            VaultError::InvalidHeader(_) => {}
+            other => panic!("expected InvalidHeader (version-out-of-range), got: {other:?}"),
+        }
+    }
+
+    /// emit_envelope must produce: header line, then base64 body, ending with newline-after-body.
+    #[test]
+    fn envelope_emit_layout() {
+        let emitted = emit_envelope(b"abc", 1);
+
+        // Must start with the header magic.
+        assert!(
+            emitted.starts_with("$RUNSIBLE_VAULT;1;CHACHA20-POLY1305;AGE;1"),
+            "emitted must start with the canonical header line, got: {emitted:?}"
+        );
+
+        // Header is followed by a newline.
+        let first_nl = emitted.find('\n').expect("must contain a newline after header");
+        let after_header = &emitted[first_nl + 1..];
+
+        // The body must be non-empty base64 and end with a newline.
+        assert!(emitted.ends_with('\n'), "emitted must end with newline-after-body");
+        assert!(!after_header.is_empty(), "body must not be empty");
+
+        // Body chars (minus trailing newline) must all be base64 standard chars.
+        let body_text = after_header.trim_end_matches('\n');
+        for c in body_text.chars() {
+            assert!(
+                c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=' || c == '\n',
+                "unexpected base64 char: {c:?}"
+            );
+        }
+    }
+
+    /// Round-trip: emit then parse a 32-byte body.
+    #[test]
+    fn envelope_roundtrip_random_body() {
+        // 32 deterministic-but-arbitrary bytes (no rand crate).
+        let mut body = [0u8; 32];
+        let mut state: u64 = 0xCAFEBABE;
+        for slot in &mut body {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *slot = (state >> 33) as u8;
+        }
+
+        let emitted = emit_envelope(&body, 5);
+        let parsed = parse_envelope(&emitted).expect("parse roundtrip");
+        assert_eq!(parsed.recipient_count, 5);
+        assert_eq!(parsed.body, body.to_vec());
+    }
 }

@@ -299,4 +299,72 @@ mod tests {
             }
         }
     }
+
+    // ── Added coverage ─────────────────────────────────────────────────
+
+    /// Async exec with stdin piped to `cat`.
+    #[tokio::test]
+    async fn local_async_exec_with_stdin() {
+        if std::process::Command::new("cat").arg("/dev/null").output().is_err() {
+            eprintln!("skip: no cat available");
+            return;
+        }
+        let conn = LocalConnection;
+        let mut cmd = base_cmd(vec!["cat"]);
+        cmd.stdin = Some(b"hi-async".to_vec());
+        let out = conn.exec(&cmd).await.expect("exec failed");
+        assert_eq!(out.rc, 0);
+        assert_eq!(out.stdout, b"hi-async");
+    }
+
+    /// Async exec timeout: `sleep 5` with a 50ms timeout should bail quickly.
+    #[tokio::test]
+    async fn local_async_exec_timeout() {
+        if std::process::Command::new("sleep").arg("0").output().is_err() {
+            eprintln!("skip: no sleep available");
+            return;
+        }
+        let conn = LocalConnection;
+        let mut cmd = base_cmd(vec!["sleep", "5"]);
+        cmd.timeout = Some(Duration::from_millis(50));
+
+        let started = std::time::Instant::now();
+        let result = conn.exec(&cmd).await;
+        let elapsed = started.elapsed();
+
+        // Either the connection returns Err with a timeout-shaped error, or returns
+        // Ok with rc != 0. Either way it must complete well before sleep would.
+        assert!(
+            elapsed < Duration::from_millis(1500),
+            "timeout-bound exec ran too long: {:?}",
+            elapsed
+        );
+        match result {
+            Err(_) => { /* timeout error path */ }
+            Ok(out) => {
+                assert_ne!(out.rc, 0, "expected non-zero rc on timeout, got 0");
+            }
+        }
+    }
+
+    /// Round-trip: write a temp file via put_file then read back via slurp.
+    #[tokio::test]
+    async fn local_async_slurp_putfile_round_trip() {
+        let pid = std::process::id();
+        let src = std::env::temp_dir().join(format!("rsl-async-rt-src-{}.txt", pid));
+        let dst = std::env::temp_dir().join(format!("rsl-async-rt-dst-{}.txt", pid));
+
+        tokio::fs::write(&src, b"async round trip")
+            .await
+            .expect("write src");
+
+        let conn = LocalConnection;
+        conn.put_file(&src, &dst, None).await.expect("put_file");
+
+        let bytes = conn.slurp(&dst).await.expect("slurp");
+        assert_eq!(bytes, b"async round trip");
+
+        let _ = tokio::fs::remove_file(&src).await;
+        let _ = tokio::fs::remove_file(&dst).await;
+    }
 }

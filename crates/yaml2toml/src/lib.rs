@@ -642,4 +642,210 @@ databases:
             .unwrap_or_else(|e| panic!("invalid TOML:\n{}\n\nerror: {}", result.toml, e));
         assert!(parsed.get("webservers").is_some(), "webservers group missing");
     }
+
+    // ── Added coverage ─────────────────────────────────────────────────
+
+    // ─── Value mappings ───
+
+    /// YAML int beyond i32 range still survives as a TOML integer.
+    #[test]
+    fn value_large_int() {
+        let yaml = "big: 9999999999\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["big"].as_integer(), Some(9_999_999_999));
+    }
+
+    /// Negative integers preserved.
+    #[test]
+    fn value_negative_int() {
+        let yaml = "n: -42\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["n"].as_integer(), Some(-42));
+    }
+
+    /// Float survives as TOML float.
+    #[test]
+    fn value_float() {
+        let yaml = "pi: 3.14\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        let pi = parsed["pi"].as_float().expect("pi as float");
+        assert!((pi - 3.14).abs() < 1e-9);
+    }
+
+    /// Bool true and false both survive.
+    #[test]
+    fn value_bool_true_false() {
+        let yaml = "t: true\nf: false\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["t"].as_bool(), Some(true));
+        assert_eq!(parsed["f"].as_bool(), Some(false));
+    }
+
+    /// Quoted YAML string with an embedded newline survives as TOML string.
+    #[test]
+    fn value_string_with_special_chars() {
+        let yaml = "s: \"hello\\nworld\"\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["s"].as_str(), Some("hello\nworld"));
+    }
+
+    /// Block-scalar (literal) string: lines preserved as-is.
+    #[test]
+    fn value_block_scalar_literal() {
+        let yaml = "doc: |\n  line one\n  line two\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        let s = parsed["doc"].as_str().expect("doc string");
+        assert!(s.contains("line one"), "got: {:?}", s);
+        assert!(s.contains("line two"), "got: {:?}", s);
+        // The literal block keeps a newline between the two lines
+        assert!(s.contains("line one\nline two"), "got: {:?}", s);
+    }
+
+    // ─── Sequences / mappings ───
+
+    /// Empty top-level YAML mapping yields parseable TOML.
+    #[test]
+    fn empty_mapping_parses() {
+        let yaml = "{}\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value =
+            toml::from_str(&result.toml).expect("invalid TOML output for empty mapping");
+        if let toml::Value::Table(t) = parsed {
+            assert!(t.is_empty(), "expected empty table, got {:?}", t);
+        } else {
+            panic!("expected table at top level");
+        }
+    }
+
+    /// Three-level nested mapping survives as TOML and round-trips.
+    #[test]
+    fn nested_mapping_three_levels() {
+        let yaml = r#"
+a:
+  b:
+    c: 1
+"#;
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml)
+            .unwrap_or_else(|e| panic!("invalid TOML:\n{}\n\nerror: {}", result.toml, e));
+        let c = parsed
+            .get("a")
+            .and_then(|v| v.get("b"))
+            .and_then(|v| v.get("c"))
+            .and_then(|v| v.as_integer());
+        assert_eq!(c, Some(1), "TOML was:\n{}", result.toml);
+    }
+
+    /// Array of mappings survives as TOML and elements are accessible.
+    #[test]
+    fn array_of_mappings() {
+        let yaml = r#"
+items:
+  - name: alice
+    age: 30
+  - name: bob
+    age: 25
+"#;
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml)
+            .unwrap_or_else(|e| panic!("invalid TOML:\n{}\n\nerror: {}", result.toml, e));
+        let items = parsed["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].get("name").and_then(|v| v.as_str()), Some("alice"));
+        assert_eq!(items[1].get("age").and_then(|v| v.as_integer()), Some(25));
+    }
+
+    // ─── Profile detection ───
+
+    /// `Profile::Auto` on an empty top-level list — current behavior is to take
+    /// the Playbook branch (Sequence -> Playbook). Lock that in.
+    #[test]
+    fn profile_auto_empty_list_locks_behavior() {
+        let yaml = "[]\n";
+        let result = convert(yaml, Profile::Auto).expect("convert");
+        // Playbook handler emits an empty `[[plays]]` array of tables. The TOML
+        // serializer for an empty AOT may emit either nothing or an empty section,
+        // so we just make sure the output parses and does NOT contain [vars]-shaped
+        // top-level keys (i.e. it is not Vars-profile output).
+        let parsed: toml::Value = toml::from_str(&result.toml)
+            .unwrap_or_else(|e| panic!("invalid TOML:\n{}\n\nerror: {}", result.toml, e));
+        // Either no `plays` key (because empty AOT was elided) or `plays` is an
+        // empty array. Either is acceptable; we just want parse success.
+        match parsed.get("plays") {
+            None => {}
+            Some(toml::Value::Array(a)) => assert!(a.is_empty(), "expected empty plays"),
+            Some(other) => panic!("unexpected plays shape: {:?}", other),
+        }
+    }
+
+    /// `Profile::Auto` on a flat scalar mapping detects Vars (no [[plays]]).
+    #[test]
+    fn profile_auto_flat_scalar_is_vars() {
+        let yaml = "alpha: 1\nbeta: two\n";
+        let result = convert(yaml, Profile::Auto).expect("convert");
+        assert!(
+            !result.toml.contains("[[plays]]"),
+            "did not expect plays-shape output: {}",
+            result.toml
+        );
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["alpha"].as_integer(), Some(1));
+        assert_eq!(parsed["beta"].as_str(), Some("two"));
+    }
+
+    // ─── Key quoting ───
+
+    /// Hyphenated kebab-case keys are bare in TOML (hyphens allowed).
+    #[test]
+    fn key_quoting_kebab_case_is_bare() {
+        let yaml = "kebab-case: 1\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        // The repr should be bare, with no surrounding quotes.
+        assert!(
+            result.toml.contains("kebab-case = 1"),
+            "expected bare hyphenated key in: {}",
+            result.toml
+        );
+        assert!(
+            !result.toml.contains("\"kebab-case\""),
+            "did not expect quoted kebab-case key in: {}",
+            result.toml
+        );
+        let parsed: toml::Value = toml::from_str(&result.toml).expect("toml");
+        assert_eq!(parsed["kebab-case"].as_integer(), Some(1));
+    }
+
+    /// Keys starting with a digit: TOML allows leading digits in bare keys, and
+    /// the converter emits them bare. Lock in that behavior — what really matters
+    /// is that the output parses round-trip.
+    #[test]
+    fn key_quoting_leading_digit_round_trips() {
+        let yaml = "1key: 1\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        let parsed: toml::Value = toml::from_str(&result.toml).unwrap_or_else(|e| {
+            panic!("invalid TOML for leading-digit key:\n{}\nerr: {}", result.toml, e)
+        });
+        assert_eq!(parsed["1key"].as_integer(), Some(1));
+    }
+
+    /// Keys with characters outside [A-Za-z0-9_-] (here: a dot) MUST be quoted.
+    #[test]
+    fn key_quoting_dotted_key_is_quoted() {
+        let yaml = "weird.key: 1\n";
+        let result = convert(yaml, Profile::Vars).expect("convert");
+        assert!(
+            result.toml.contains("\"weird.key\""),
+            "expected quoted dotted key in: {}",
+            result.toml
+        );
+        let parsed: toml::Value = toml::from_str(&result.toml)
+            .unwrap_or_else(|e| panic!("invalid TOML:\n{}\n\nerror: {}", result.toml, e));
+        assert_eq!(parsed["weird.key"].as_integer(), Some(1));
+    }
 }

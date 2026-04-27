@@ -121,3 +121,33 @@ pub enum SecretSource {
     Env(String),
     Plaintext(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Compile-time assertion helper: succeeds only if T: Copy + PartialEq.
+    fn assert_copy_eq<T: Copy + PartialEq>() {}
+
+    #[test]
+    fn become_method_is_copy_and_partial_eq() {
+        // Bound check — if either trait is dropped from BecomeMethod the
+        // generic call below fails to compile.
+        assert_copy_eq::<BecomeMethod>();
+
+        let a = BecomeMethod::Sudo;
+        let b = a; // Copy: this would move-out without Copy.
+        assert_eq!(a, b);
+        assert_ne!(BecomeMethod::Sudo, BecomeMethod::Su);
+
+        // Usable as a hashable-ish key — at minimum, equality lookups work for
+        // any keyed map that requires PartialEq + Eq + Hash. BecomeMethod is
+        // also Eq (derived), but we can verify Copy + PartialEq via a Vec.
+        let mut seen: HashMap<&'static str, BecomeMethod> = HashMap::new();
+        seen.insert("a", BecomeMethod::Sudo);
+        seen.insert("b", BecomeMethod::Doas);
+        assert_eq!(seen.get("a"), Some(&BecomeMethod::Sudo));
+        assert_eq!(seen.get("b"), Some(&BecomeMethod::Doas));
+    }
+}

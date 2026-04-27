@@ -437,4 +437,149 @@ mod tests {
         let s = init_default();
         let _: Config = toml::from_str(&s).unwrap();
     }
+
+    // -----------------------------------------------------------------------
+    // Config defaults
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn defaults_forks_is_20() {
+        assert_eq!(Config::default().defaults.forks, 20);
+    }
+
+    #[test]
+    fn defaults_vault_recipients_file_is_none() {
+        assert!(Config::default().vault.recipients_file.is_none());
+    }
+
+    #[test]
+    fn defaults_output_color_is_auto() {
+        assert_eq!(Config::default().output.color, ColorPolicy::Auto);
+    }
+
+    // -----------------------------------------------------------------------
+    // TOML round-trip
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn toml_roundtrip_preserves_fields() {
+        let original = Config::default();
+        let serialized = toml::to_string(&original).expect("serialize");
+        let parsed: Config = toml::from_str(&serialized).expect("deserialize");
+
+        assert_eq!(parsed.defaults.forks, original.defaults.forks);
+        assert_eq!(parsed.defaults.timeout_seconds, original.defaults.timeout_seconds);
+        assert_eq!(
+            parsed.defaults.poll_interval_seconds,
+            original.defaults.poll_interval_seconds
+        );
+        assert_eq!(parsed.defaults.gather_facts, original.defaults.gather_facts);
+        assert_eq!(parsed.schema_version, original.schema_version);
+        assert_eq!(parsed.output.color, original.output.color);
+        assert_eq!(parsed.ssh.timeout_seconds, original.ssh.timeout_seconds);
+    }
+
+    #[test]
+    fn partial_toml_falls_back_to_defaults() {
+        // Top-level partial: only schema_version provided. Every section
+        // (including [defaults], [output], [ssh], ...) is omitted and must
+        // therefore fall back to its compiled-in default.
+        let s = "schema_version = 1\n";
+        let parsed: Config = toml::from_str(s).expect("partial deserialize");
+        assert_eq!(parsed.schema_version, 1);
+        // Omitted sections fall back to defaults.
+        assert_eq!(parsed.defaults.forks, 20);
+        assert_eq!(parsed.defaults.timeout_seconds, 30);
+        assert_eq!(parsed.defaults.poll_interval_seconds, 1);
+        assert_eq!(parsed.output.color, ColorPolicy::Auto);
+        assert_eq!(parsed.ssh.timeout_seconds, 10);
+    }
+
+    #[test]
+    fn unknown_key_in_defaults_section_rejected() {
+        let s = "[defaults]\nforks = 5\nmystery_field = 42\n";
+        let r: std::result::Result<Config, _> = toml::from_str(s);
+        assert!(
+            r.is_err(),
+            "deny_unknown_fields on Defaults must reject mystery_field"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // init_default
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn init_default_contains_header_comment() {
+        let s = init_default();
+        assert!(
+            s.contains("# runsible.toml"),
+            "init_default output must contain the '# runsible.toml' header"
+        );
+    }
+
+    #[test]
+    fn init_default_parses_with_current_schema_version() {
+        let s = init_default();
+        let parsed: Config = toml::from_str(&s).expect("init_default must parse");
+        assert_eq!(parsed.schema_version, SCHEMA_VERSION);
+        assert_eq!(parsed.schema_version, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Schema version (load_from_path)
+    // -----------------------------------------------------------------------
+
+    fn unique_tempfile(label: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        // Suffix with PID + label + nanos for uniqueness across parallel tests.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        p.push(format!(
+            "rsl-cfg-test-{}-{}-{}.toml",
+            std::process::id(),
+            label,
+            nanos
+        ));
+        p
+    }
+
+    #[test]
+    fn schema_version_1_accepted_via_load_from_path() {
+        let path = unique_tempfile("schema-1");
+        std::fs::write(&path, "schema_version = 1\n").expect("write");
+        let result = load_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+        let loaded = result.expect("schema_version = 1 must load");
+        assert_eq!(loaded.config.schema_version, 1);
+    }
+
+    #[test]
+    fn schema_version_99_rejected_via_load_from_path() {
+        let path = unique_tempfile("schema-99");
+        std::fs::write(&path, "schema_version = 99\n").expect("write");
+        let result = load_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_err(),
+            "schema_version = 99 must be rejected by load_from_path"
+        );
+    }
+
+    #[test]
+    fn missing_schema_version_defaults_to_current() {
+        let path = unique_tempfile("schema-missing");
+        // Empty file: no schema_version field at all, no sections.
+        // Every top-level section falls back to its default; schema_version
+        // falls back to SCHEMA_VERSION via #[serde(default = ...)].
+        std::fs::write(&path, "").expect("write");
+        let result = load_from_path(&path);
+        let _ = std::fs::remove_file(&path);
+        let loaded = result.expect("missing schema_version must default");
+        assert_eq!(loaded.config.schema_version, SCHEMA_VERSION);
+        // And defaults are still in place.
+        assert_eq!(loaded.config.defaults.forks, 20);
+    }
 }

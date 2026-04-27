@@ -279,4 +279,57 @@ mod tests {
             "public key must survive roundtrip"
         );
     }
+
+    /// With two entries, first_public_key returns the first one inserted.
+    #[test]
+    fn keystore_first_public_key_returns_first_entry() {
+        let (id_a, rec_a) = keygen();
+        let (id_b, rec_b) = keygen();
+
+        let entry_a = KeyEntry {
+            public: rec_a.to_string(),
+            private: id_a.to_string().expose_secret().to_owned(),
+            created: "2025-01-01T00:00:00Z".to_string(),
+        };
+        let entry_b = KeyEntry {
+            public: rec_b.to_string(),
+            private: id_b.to_string().expose_secret().to_owned(),
+            created: "2025-01-02T00:00:00Z".to_string(),
+        };
+
+        let mut store = KeyStore::default();
+        store.add("alpha", entry_a.clone());
+        store.add("bravo", entry_b);
+
+        assert_eq!(
+            store.first_public_key().as_deref(),
+            Some(entry_a.public.as_str()),
+            "first_public_key must return the first inserted entry's pubkey"
+        );
+    }
+
+    /// KeyStore.add overwrites an existing label (insert semantics on the same key).
+    #[test]
+    fn keystore_add_overwrites_existing_label() {
+        let (id_a, rec_a) = keygen();
+        let (id_b, rec_b) = keygen();
+
+        let entry_a = KeyEntry {
+            public: rec_a.to_string(),
+            private: id_a.to_string().expose_secret().to_owned(),
+            created: "2025-01-01T00:00:00Z".to_string(),
+        };
+        let entry_b = KeyEntry {
+            public: rec_b.to_string(),
+            private: id_b.to_string().expose_secret().to_owned(),
+            created: "2025-01-02T00:00:00Z".to_string(),
+        };
+
+        let mut store = KeyStore::default();
+        store.add("default", entry_a);
+        store.add("default", entry_b.clone());
+
+        assert_eq!(store.keys.len(), 1, "label collision must overwrite, not append");
+        assert_eq!(store.keys["default"].public, entry_b.public);
+    }
 }

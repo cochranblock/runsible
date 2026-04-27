@@ -140,4 +140,27 @@ mod tests {
         let read_back = Heartbeat::read(&cfg.paths.heartbeat_path).unwrap();
         assert_eq!(read_back, hb);
     }
+
+    #[test]
+    fn pull_once_with_bogus_url_records_fetch_error() {
+        if !fetch::git_available() {
+            eprintln!("skipping pull_once_with_bogus_url: git not on PATH");
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = fake_cfg(dir.path());
+        cfg.source.url = "https://invalid.invalid.invalid/no/such/repo.git".into();
+
+        let hb = pull_once(&cfg).expect("heartbeat must still be written");
+        // The captured error message should reference the fetch phase; the
+        // exit code is the M0-defined `3 == fetch failed` value.
+        assert_eq!(hb.result.exit_code, 3);
+        assert!(
+            hb.errors.iter().any(|e| e.starts_with("fetch:")),
+            "expected a 'fetch:' error message; got: {:?}",
+            hb.errors
+        );
+        assert!(cfg.paths.heartbeat_path.exists());
+    }
 }
