@@ -93,6 +93,8 @@ Exit code: 0
 
 | Hash | Date | Description |
 |------|------|-------------|
+| 3a46638 | 2026-04-27 | exopack TRIPLE SIMS gates per crate (14/14) + cochranblock provenance pattern |
+| bceb2e7 | 2026-04-27 | broad test coverage expansion: 148 → 354 tests workspace-wide |
 | 372bd37 | 2026-04-27 | runsible-playbook M1: roles |
 | 504a470 | 2026-04-26 | runsible-playbook M1 expansion: template/package/service/systemd_service/get_url + loop/until/block |
 | 1ed0079 | 2026-04-26 | runsible-playbook M1: ExecutionContext refactor + command/shell/copy/file modules |
