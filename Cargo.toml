@@ -21,7 +21,7 @@ members = [
 version = "0.0.1"
 edition = "2021"
 license = "Unlicense"
-repository = "https://github.com/mcochran/runsible"
+repository = "https://github.com/cochranblock/runsible"
 authors = ["Cochran Block"]
 
 [workspace.dependencies]
