@@ -10,6 +10,14 @@
 
 ## Entries
 
+### 2026-04-26 — runsible-playbook M1 expansion: 5 new modules + loop/until/block
+
+**What:** Added 5 builtin modules (template, package, service, systemd_service, get_url) bringing the total to 13. Refactored the engine's per-task body into `execute_one_task` so block/rescue/always could recursively reuse it. Added engine support for `loop = [...]`/`loop_control { loop_var, label }` (one task execution per item, item bound in vars), `until = { expr }` + `retries` + `delay_seconds` (re-run with sleep until expression true), and `block`/`rescue`/`always` (block children fail-fast → rescue runs on failure → always always runs). Workspace: 142/142 tests green.
+**Why:** Without loop, even basic playbooks (install N packages, restart M services) require N+M task duplication. Without block/rescue, error recovery is impossible without abandoning the play. Without template, every config file becomes a copy + manual sed pipeline. The 13-module catalog now covers ~80% of typical Ansible playbook content.
+**Commit:** pending
+**AI Role:** AI ran 2 parallel agents for the 5 new modules (template alone, then package+service+systemd_service+get_url together), then sequentially refactored the engine for loop/until/block. Human directed prioritization within M1.
+**Proof:** `~/.cargo/bin/cargo test --workspace` — 142 tests pass (was 131); 13 builtin modules registered; loop, until, block all have integration tests.
+
 ### 2026-04-26 — Module trait refactor + 4 connection-using builtins (command/shell/copy/file)
 
 **What:** Refactored the `DynModule` trait to take `&ExecutionContext` instead of `&Host` — a context bundle (host + vars + sync connection + check_mode flag) defined in `runsible-core::traits`. Added new sync `SyncConnection` trait (exec/put_file/slurp/file_exists) alongside the existing async `Connection` trait, plus a `LocalSync` impl in `runsible-connection` (std::process + std::fs, no async runtime). Updated all 4 existing modules (debug, ping, set_fact, assert) to use ctx.host. Implemented 4 new connection-using builtins: `command` (argv, no shell, with creates/removes idempotence guards), `shell` (sh -c with same guards), `copy` (src OR content → dest with byte-equality idempotence check), `file` (state=present/absent/directory/touch). Engine constructs a fresh `ExecutionContext { host, &vars, &LocalSync, check_mode: false }` per task per host. Workspace: 131/131 tests green.

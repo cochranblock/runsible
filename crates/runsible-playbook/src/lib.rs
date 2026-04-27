@@ -385,6 +385,227 @@ file = {{ path = "{dir_str}", state = "directory" }}
     }
 
     #[test]
+    fn template_module_renders_and_writes() {
+        let src_path = std::env::temp_dir().join(format!("rsl-tpl-src-{}.j2", std::process::id()));
+        let dest_path = std::env::temp_dir().join(format!("rsl-tpl-dst-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&src_path);
+        let _ = std::fs::remove_file(&dest_path);
+        std::fs::write(&src_path, "Hello, {{ name }}! You are {{ age }}.\n").unwrap();
+
+        let src_str = src_path.to_string_lossy().replace('\\', "\\\\");
+        let dest_str = dest_path.to_string_lossy().replace('\\', "\\\\");
+        let pb = format!(r#"
+[imports]
+template = "runsible_builtin.template"
+[[plays]]
+name = "Tpl"
+hosts = "localhost"
+[plays.vars]
+name = "Alice"
+age = 30
+[[plays.tasks]]
+name = "render"
+template = {{ src = "{src_str}", dest = "{dest_str}" }}
+"#);
+        let r = run(&pb, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.changed, 1);
+        let written = std::fs::read_to_string(&dest_path).unwrap();
+        assert_eq!(written, "Hello, Alice! You are 30.\n");
+
+        // Second run: same content → no change.
+        let r2 = run(&pb, "localhost,", "test").unwrap();
+        assert_eq!(r2.changed, 0);
+        assert_eq!(r2.ok, 1);
+
+        let _ = std::fs::remove_file(&src_path);
+        let _ = std::fs::remove_file(&dest_path);
+    }
+
+    #[test]
+    fn catalog_has_new_m1_modules() {
+        let cat = catalog::ModuleCatalog::with_builtins();
+        assert!(cat.get("runsible_builtin.package").is_some());
+        assert!(cat.get("runsible_builtin.service").is_some());
+        assert!(cat.get("runsible_builtin.systemd_service").is_some());
+        assert!(cat.get("runsible_builtin.get_url").is_some());
+    }
+
+    #[test]
+    fn package_plan_requires_name() {
+        use runsible_core::types::{Host, Vars};
+        use runsible_core::traits::ExecutionContext;
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let m = modules::package::PackageModule;
+        let args = toml::from_str::<toml::Value>(r#"state = "present""#).unwrap();
+        let r = catalog::DynModule::plan(&m, &args, &ctx);
+        assert!(r.is_err(), "package without name should error");
+    }
+
+    #[test]
+    fn service_plan_requires_name() {
+        use runsible_core::types::{Host, Vars};
+        use runsible_core::traits::ExecutionContext;
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let m = modules::service::ServiceModule;
+        let args = toml::from_str::<toml::Value>(r#"state = "started""#).unwrap();
+        let r = catalog::DynModule::plan(&m, &args, &ctx);
+        assert!(r.is_err(), "service without name should error");
+    }
+
+    #[test]
+    fn get_url_plan_requires_url_and_dest() {
+        use runsible_core::types::{Host, Vars};
+        use runsible_core::traits::ExecutionContext;
+        let host = Host { name: "h".into(), vars: Vars::new() };
+        let vars = Vars::new();
+        let conn = runsible_connection::LocalSync;
+        let ctx = ExecutionContext { host: &host, vars: &vars, connection: &conn, check_mode: false };
+        let m = modules::get_url::GetUrlModule;
+        let args = toml::from_str::<toml::Value>(r#"url = "https://example.com""#).unwrap();
+        let r = catalog::DynModule::plan(&m, &args, &ctx);
+        assert!(r.is_err(), "get_url without dest should error");
+    }
+
+    #[test]
+    fn loop_runs_task_per_item() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Loop"
+hosts = "localhost"
+[[plays.tasks]]
+name = "iterate"
+loop = ["a", "b", "c"]
+debug = { msg = "item is {{ item }}" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        // Loop adds one task outcome per item.
+        assert_eq!(r.ok, 3);
+    }
+
+    #[test]
+    fn loop_with_loop_var_renames_binding() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "LoopVar"
+hosts = "localhost"
+[[plays.tasks]]
+name = "iterate"
+loop = ["x", "y"]
+loop_control = { loop_var = "thing" }
+debug = { msg = "thing is {{ thing }}" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn until_succeeds_first_attempt() {
+        let src = r#"
+[imports]
+set_fact = "runsible_builtin.set_fact"
+[[plays]]
+name = "Until"
+hosts = "localhost"
+[[plays.tasks]]
+name = "trivially-true"
+register = "r"
+until = { expr = "r.status == 'ok'" }
+retries = 3
+delay_seconds = 0
+set_fact = { dummy = "x" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        // set_fact reports Ok; until is true on first attempt.
+        assert_eq!(r.ok, 1);
+    }
+
+    #[test]
+    fn block_runs_all_children_when_clean() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Block"
+hosts = "localhost"
+[[plays.tasks]]
+name = "Wrap"
+[[plays.tasks.block]]
+name = "first"
+debug = { msg = "1" }
+[[plays.tasks.block]]
+name = "second"
+debug = { msg = "2" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        // Two child debugs run; both Ok.
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn rescue_runs_only_when_block_fails() {
+        let src = r#"
+[imports]
+assert = "runsible_builtin.assert"
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Rescue"
+hosts = "localhost"
+[[plays.tasks]]
+name = "Wrap"
+[[plays.tasks.block]]
+name = "fails"
+assert = { that = ["1 == 2"] }
+[[plays.tasks.rescue]]
+name = "rescue runs"
+debug = { msg = "recovered" }
+[[plays.tasks.always]]
+name = "always runs"
+debug = { msg = "cleanup" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        // 1 Failed (the assert) + 1 Ok (rescue debug) + 1 Ok (always debug)
+        assert_eq!(r.failed, 1);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
+    fn always_runs_even_on_clean_block() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Always"
+hosts = "localhost"
+[[plays.tasks]]
+name = "Wrap"
+[[plays.tasks.block]]
+name = "ok"
+debug = { msg = "ok" }
+[[plays.tasks.always]]
+name = "always"
+debug = { msg = "always" }
+"#;
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.failed, 0);
+        assert_eq!(r.ok, 2);
+    }
+
+    #[test]
     fn unknown_module_errors() {
         let src = r#"
 [[plays]]

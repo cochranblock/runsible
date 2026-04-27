@@ -42,6 +42,11 @@ impl Templater {
     pub fn new() -> Self {
         let mut env = Environment::new();
         env.set_undefined_behavior(UndefinedBehavior::Strict);
+        // Preserve a trailing newline in template sources. Jinja's default is
+        // to swallow one final newline; for the `template` module that means a
+        // file ending in `\n` would round-trip without it, breaking byte-equal
+        // idempotence and producing files without terminators. Keep it.
+        env.set_keep_trailing_newline(true);
         Self { env }
     }
 

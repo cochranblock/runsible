@@ -88,7 +88,30 @@ pub struct Task {
     pub when: Option<String>,
     /// Optional `notify = ["handler_id", ...]`.
     pub notify: Vec<String>,
+    /// Optional `loop = [...]` — list of items; task runs once per item with
+    /// the item bound to `loop_control.loop_var` (default `item`).
+    pub loop_items: Option<Vec<toml::Value>>,
+    /// `loop_control.loop_var` — defaults to "item".
+    pub loop_var: String,
+    /// `loop_control.label` — Jinja-rendered per-item label for events.
+    pub loop_label: Option<String>,
+    /// Optional `until = { expr = "..." }` — re-run the task until expr is true.
+    pub until: Option<String>,
+    /// `retries` — max attempts with `until`. Default 3.
+    pub retries: u32,
+    /// `delay_seconds` — sleep between retries. Default 5.
+    pub delay_seconds: u64,
+    /// `block = [[...]]` — child tasks. When non-empty, this task is a block
+    /// (module_name set to the `_block_` sentinel; module dispatch is skipped).
+    pub block: Vec<toml::Value>,
+    /// `rescue = [[...]]` — runs only if any block child fails.
+    pub rescue: Vec<toml::Value>,
+    /// `always = [[...]]` — runs after block (and rescue if applicable).
+    pub always: Vec<toml::Value>,
 }
+
+/// Sentinel `module_name` value indicating the task is a block, not a module call.
+pub const BLOCK_SENTINEL: &str = "_block_";
 
 // Task-level keys that are not a module call.
 pub(crate) const TASK_META_KEYS: &[&str] = &[

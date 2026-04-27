@@ -33,6 +33,11 @@ impl ModuleCatalog {
         c.register(Box::new(crate::modules::shell::ShellModule));
         c.register(Box::new(crate::modules::copy::CopyModule));
         c.register(Box::new(crate::modules::file::FileModule));
+        c.register(Box::new(crate::modules::template::TemplateModule));
+        c.register(Box::new(crate::modules::package::PackageModule));
+        c.register(Box::new(crate::modules::service::ServiceModule));
+        c.register(Box::new(crate::modules::systemd_service::SystemdServiceModule));
+        c.register(Box::new(crate::modules::get_url::GetUrlModule));
         c
     }
 

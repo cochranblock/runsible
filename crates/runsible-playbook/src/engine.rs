@@ -138,173 +138,23 @@ pub fn run_with(
             let mut notified_for_host: IndexSet<String> = IndexSet::new();
 
             for (task_idx, task) in tasks.iter().enumerate() {
-                // Tag filtering.
-                let effective_tags: Vec<&String> =
-                    task.tags.iter().chain(raw_play.tags.iter()).collect();
-                if !tag_filter_passes(&effective_tags, &opts.tags, &opts.skip_tags) {
-                    continue;
-                }
-
-                emit(
-                    &mode,
-                    &Event::TaskStart {
-                        play_index: play_idx,
-                        task_index: task_idx,
-                        name: task
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| task.module_name.clone()),
-                        module: task.module_name.clone(),
-                    },
-                );
-
-                // when evaluation.
-                if let Some(expr) = &task.when {
-                    match templater.eval_bool(expr, &vars) {
-                        Ok(false) => {
-                            let outcome = runsible_core::types::Outcome {
-                                module: task.module_name.clone(),
-                                host: host.name.clone(),
-                                status: OutcomeStatus::Skipped,
-                                elapsed_ms: 0,
-                                returns: serde_json::json!({"skipped_reason": "when=false"}),
-                            };
-                            play_stats.skipped += 1;
-                            emit(
-                                &mode,
-                                &Event::TaskOutcome {
-                                    play_index: play_idx,
-                                    task_index: task_idx,
-                                    outcome,
-                                },
-                            );
-                            continue;
-                        }
-                        Ok(true) => {}
-                        Err(e) => {
-                            return Err(PlaybookError::ExecFailed {
-                                host: host.name.clone(),
-                                message: format!("when expression error: {e}"),
-                            });
-                        }
-                    }
-                }
-
-                // Template the args.
-                let rendered_args = templater.render_value(&task.args, &vars).map_err(|e| {
-                    PlaybookError::ExecFailed {
-                        host: host.name.clone(),
-                        message: format!("template error: {e}"),
-                    }
-                })?;
-
-                let module = catalog
-                    .get(&task.module_name)
-                    .ok_or_else(|| PlaybookError::ModuleNotFound(task.module_name.clone()))?;
-
-                let ctx = ExecutionContext {
+                let final_status = execute_one_task(
+                    task,
+                    play_idx,
+                    task_idx,
                     host,
-                    vars: &vars,
-                    connection: &connection,
-                    check_mode: false,
-                };
-
-                let plan =
-                    module.plan(&rendered_args, &ctx).map_err(|e| PlaybookError::ExecFailed {
-                        host: host.name.clone(),
-                        message: e.to_string(),
-                    })?;
-
-                emit(
+                    &mut vars,
+                    &raw_play.tags,
+                    &opts,
+                    &catalog,
+                    &templater,
+                    &connection,
                     &mode,
-                    &Event::PlanComputed {
-                        play_index: play_idx,
-                        task_index: task_idx,
-                        plan: plan.clone(),
-                    },
-                );
-
-                let mut outcome =
-                    module.apply(&plan, &ctx).map_err(|e| PlaybookError::ExecFailed {
-                        host: host.name.clone(),
-                        message: e.to_string(),
-                    })?;
-
-                // Special handling for set_fact: merge plan.diff into vars.
-                if task.module_name == "runsible_builtin.set_fact" {
-                    if let Some(obj) = plan.diff.as_object() {
-                        for (k, v) in obj {
-                            if let Ok(tv) = json_to_toml_value(v.clone()) {
-                                vars.insert(k.clone(), tv);
-                            }
-                        }
-                    }
-                }
-
-                // Special handling for assert: evaluate `that` expressions.
-                if task.module_name == "runsible_builtin.assert" {
-                    let that = plan
-                        .diff
-                        .get("that")
-                        .and_then(|v| v.as_array())
-                        .cloned()
-                        .unwrap_or_default();
-                    let mut failed_expr: Option<String> = None;
-                    for expr in &that {
-                        if let Some(s) = expr.as_str() {
-                            match templater.eval_bool(s, &vars) {
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    failed_expr = Some(s.to_string());
-                                    break;
-                                }
-                                Err(e) => {
-                                    failed_expr = Some(format!("{s} ({e})"));
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if let Some(e) = failed_expr {
-                        outcome.status = OutcomeStatus::Failed;
-                        outcome.returns = serde_json::json!({
-                            "msg": "assertion failed",
-                            "evaluated_to": false,
-                            "assertion": e,
-                        });
-                    }
-                }
-
-                // register: store outcome under the named key in vars.
-                if let Some(reg_key) = &task.register {
-                    let outcome_json = serde_json::to_value(&outcome).unwrap_or_default();
-                    if let Ok(tv) = json_to_toml_value(outcome_json) {
-                        vars.insert(reg_key.clone(), tv);
-                    }
-                }
-
-                match outcome.status {
-                    OutcomeStatus::Ok => play_stats.ok += 1,
-                    OutcomeStatus::Changed => play_stats.changed += 1,
-                    OutcomeStatus::Skipped => play_stats.skipped += 1,
-                    OutcomeStatus::Failed | OutcomeStatus::Unreachable => play_stats.failed += 1,
-                }
-
-                // notify: only on Changed.
-                if matches!(outcome.status, OutcomeStatus::Changed) {
-                    for h_id in &task.notify {
-                        notified_for_host.insert(h_id.clone());
-                    }
-                }
-
-                emit(
-                    &mode,
-                    &Event::TaskOutcome {
-                        play_index: play_idx,
-                        task_index: task_idx,
-                        outcome,
-                    },
-                );
+                    &mut play_stats,
+                    &mut notified_for_host,
+                    &pb.imports,
+                )?;
+                let _ = final_status;
             }
 
             // Aggregate notifications across hosts.
@@ -406,6 +256,315 @@ pub fn run_with(
         skipped: total.skipped,
         elapsed_ms,
     })
+}
+
+/// Execute a single task (module call OR block) on a single host, accumulating
+/// stats and notifications. Returns the worst outcome status across all
+/// iterations (used by block to decide whether to enter rescue).
+#[allow(clippy::too_many_arguments)]
+fn execute_one_task(
+    task: &Task,
+    play_idx: usize,
+    task_idx: usize,
+    host: &Host,
+    vars: &mut Vars,
+    play_tags: &[String],
+    opts: &RunOptions,
+    catalog: &ModuleCatalog,
+    templater: &Templater,
+    connection: &LocalSync,
+    mode: &OutputMode,
+    play_stats: &mut RunStats,
+    notified_for_host: &mut IndexSet<String>,
+    imports: &IndexMap<String, String>,
+) -> Result<OutcomeStatus> {
+    // Tag filtering.
+    let effective_tags: Vec<&String> = task.tags.iter().chain(play_tags.iter()).collect();
+    if !tag_filter_passes(&effective_tags, &opts.tags, &opts.skip_tags) {
+        return Ok(OutcomeStatus::Skipped);
+    }
+
+    emit(
+        mode,
+        &Event::TaskStart {
+            play_index: play_idx,
+            task_index: task_idx,
+            name: task.name.clone().unwrap_or_else(|| task.module_name.clone()),
+            module: task.module_name.clone(),
+        },
+    );
+
+    // when evaluation.
+    if let Some(expr) = &task.when {
+        match templater.eval_bool(expr, vars) {
+            Ok(false) => {
+                let outcome = runsible_core::types::Outcome {
+                    module: task.module_name.clone(),
+                    host: host.name.clone(),
+                    status: OutcomeStatus::Skipped,
+                    elapsed_ms: 0,
+                    returns: serde_json::json!({"skipped_reason": "when=false"}),
+                };
+                play_stats.skipped += 1;
+                emit(
+                    mode,
+                    &Event::TaskOutcome {
+                        play_index: play_idx,
+                        task_index: task_idx,
+                        outcome,
+                    },
+                );
+                return Ok(OutcomeStatus::Skipped);
+            }
+            Ok(true) => {}
+            Err(e) => {
+                return Err(PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: format!("when expression error: {e}"),
+                });
+            }
+        }
+    }
+
+    // Block dispatch.
+    if task.module_name == crate::ast::BLOCK_SENTINEL {
+        let mut block_failed = false;
+        let mut worst = OutcomeStatus::Ok;
+
+        for (child_idx, raw) in task.block.iter().enumerate() {
+            let child = crate::parse::resolve_task(raw, imports)?;
+            let child_status = execute_one_task(
+                &child,
+                play_idx,
+                task_idx * 10_000 + child_idx + 1,
+                host,
+                vars,
+                play_tags,
+                opts,
+                catalog,
+                templater,
+                connection,
+                mode,
+                play_stats,
+                notified_for_host,
+                imports,
+            )?;
+            if matches!(child_status, OutcomeStatus::Failed | OutcomeStatus::Unreachable) {
+                block_failed = true;
+                worst = OutcomeStatus::Failed;
+                break;
+            }
+        }
+
+        if block_failed {
+            for (child_idx, raw) in task.rescue.iter().enumerate() {
+                let child = crate::parse::resolve_task(raw, imports)?;
+                let st = execute_one_task(
+                    &child,
+                    play_idx,
+                    task_idx * 10_000 + 5_000 + child_idx,
+                    host,
+                    vars,
+                    play_tags,
+                    opts,
+                    catalog,
+                    templater,
+                    connection,
+                    mode,
+                    play_stats,
+                    notified_for_host,
+                    imports,
+                )?;
+                // If rescue runs cleanly, the block recovers — downgrade worst.
+                if !matches!(st, OutcomeStatus::Failed | OutcomeStatus::Unreachable) {
+                    worst = OutcomeStatus::Changed;
+                }
+            }
+        }
+
+        for (child_idx, raw) in task.always.iter().enumerate() {
+            let child = crate::parse::resolve_task(raw, imports)?;
+            let _ = execute_one_task(
+                &child,
+                play_idx,
+                task_idx * 10_000 + 9_000 + child_idx,
+                host,
+                vars,
+                play_tags,
+                opts,
+                catalog,
+                templater,
+                connection,
+                mode,
+                play_stats,
+                notified_for_host,
+                imports,
+            )?;
+        }
+
+        return Ok(worst);
+    }
+
+    // Module dispatch path.
+    let iterations: Vec<Option<toml::Value>> = match &task.loop_items {
+        Some(items) => items.iter().cloned().map(Some).collect(),
+        None => vec![None],
+    };
+
+    let module = catalog
+        .get(&task.module_name)
+        .ok_or_else(|| PlaybookError::ModuleNotFound(task.module_name.clone()))?;
+
+    let mut worst = OutcomeStatus::Ok;
+
+    for iter_item in iterations {
+        if let Some(item) = &iter_item {
+            vars.insert(task.loop_var.clone(), item.clone());
+        }
+
+        let max_attempts = if task.until.is_some() { task.retries.max(1) } else { 1 };
+        let mut last_outcome: Option<runsible_core::types::Outcome> = None;
+
+        for attempt in 1..=max_attempts {
+            let rendered_args = templater.render_value(&task.args, vars).map_err(|e| {
+                PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: format!("template error: {e}"),
+                }
+            })?;
+
+            let ctx = ExecutionContext {
+                host,
+                vars,
+                connection,
+                check_mode: false,
+            };
+
+            let plan = module.plan(&rendered_args, &ctx).map_err(|e| {
+                PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: e.to_string(),
+                }
+            })?;
+
+            emit(
+                mode,
+                &Event::PlanComputed {
+                    play_index: play_idx,
+                    task_index: task_idx,
+                    plan: plan.clone(),
+                },
+            );
+
+            let mut outcome = module.apply(&plan, &ctx).map_err(|e| {
+                PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: e.to_string(),
+                }
+            })?;
+
+            if task.module_name == "runsible_builtin.set_fact" {
+                if let Some(obj) = plan.diff.as_object() {
+                    for (k, v) in obj {
+                        if let Ok(tv) = json_to_toml_value(v.clone()) {
+                            vars.insert(k.clone(), tv);
+                        }
+                    }
+                }
+            }
+
+            if task.module_name == "runsible_builtin.assert" {
+                let that = plan
+                    .diff
+                    .get("that")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let mut failed_expr: Option<String> = None;
+                for expr in &that {
+                    if let Some(s) = expr.as_str() {
+                        match templater.eval_bool(s, vars) {
+                            Ok(true) => {}
+                            Ok(false) => {
+                                failed_expr = Some(s.to_string());
+                                break;
+                            }
+                            Err(e) => {
+                                failed_expr = Some(format!("{s} ({e})"));
+                                break;
+                            }
+                        }
+                    }
+                }
+                if let Some(e) = failed_expr {
+                    outcome.status = OutcomeStatus::Failed;
+                    outcome.returns = serde_json::json!({
+                        "msg": "assertion failed",
+                        "evaluated_to": false,
+                        "assertion": e,
+                    });
+                }
+            }
+
+            if let Some(reg_key) = &task.register {
+                let outcome_json = serde_json::to_value(&outcome).unwrap_or_default();
+                if let Ok(tv) = json_to_toml_value(outcome_json) {
+                    vars.insert(reg_key.clone(), tv);
+                }
+            }
+
+            last_outcome = Some(outcome);
+
+            if let Some(expr) = &task.until {
+                match templater.eval_bool(expr, vars) {
+                    Ok(true) => break,
+                    Ok(false) | Err(_) => {
+                        if attempt < max_attempts {
+                            std::thread::sleep(std::time::Duration::from_secs(
+                                task.delay_seconds,
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        let outcome = last_outcome.expect("attempt loop must run once");
+
+        match outcome.status {
+            OutcomeStatus::Ok => play_stats.ok += 1,
+            OutcomeStatus::Changed => {
+                play_stats.changed += 1;
+                if matches!(worst, OutcomeStatus::Ok) {
+                    worst = OutcomeStatus::Changed;
+                }
+            }
+            OutcomeStatus::Skipped => play_stats.skipped += 1,
+            OutcomeStatus::Failed | OutcomeStatus::Unreachable => {
+                play_stats.failed += 1;
+                worst = OutcomeStatus::Failed;
+            }
+        }
+
+        if matches!(outcome.status, OutcomeStatus::Changed) {
+            for h_id in &task.notify {
+                notified_for_host.insert(h_id.clone());
+            }
+        }
+
+        emit(
+            mode,
+            &Event::TaskOutcome {
+                play_index: play_idx,
+                task_index: task_idx,
+                outcome,
+            },
+        );
+    }
+
+    Ok(worst)
 }
 
 /// Tag filter logic:
