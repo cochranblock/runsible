@@ -84,6 +84,21 @@ impl DocRegistry {
             builtin_service(),
             builtin_systemd_service(),
             builtin_get_url(),
+            builtin_lineinfile(),
+            builtin_blockinfile(),
+            builtin_replace(),
+            builtin_stat(),
+            builtin_find(),
+            builtin_fail(),
+            builtin_pause(),
+            builtin_wait_for(),
+            builtin_uri(),
+            builtin_archive(),
+            builtin_unarchive(),
+            builtin_user(),
+            builtin_group(),
+            builtin_cron(),
+            builtin_hostname(),
         ] {
             docs.insert(d.name.clone(), d);
         }
@@ -1433,6 +1448,1463 @@ fn builtin_get_url() -> ModuleDoc {
 }
 
 // ---------------------------------------------------------------------------
+// runsible_builtin.lineinfile
+// ---------------------------------------------------------------------------
+
+fn builtin_lineinfile() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt(
+            "Path to the file on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "line".to_string(),
+        opt(
+            "Desired line. Required when `state = \"present\"`. Used as the \
+             literal replacement (or the value to ensure exists).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "regexp".to_string(),
+        opt(
+            "Pattern matched against existing lines. With `state = \"present\"` \
+             a matching line is replaced by `line`; with `state = \"absent\"` \
+             matching lines are removed. The runsible matcher supports `^`, `$`, \
+             and literal substring matches (no full regex engine yet).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Whether the line should be present or absent in the file.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent"],
+        ),
+    );
+    options.insert(
+        "insertbefore".to_string(),
+        opt(
+            "When inserting a new line, place it before the first line matching \
+             this pattern (or the special value \"BOF\" for top of file).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "insertafter".to_string(),
+        opt(
+            "When inserting a new line, place it after the last line matching \
+             this pattern (or \"EOF\" for end of file).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "create".to_string(),
+        opt(
+            "Create the file if it does not exist. If false and the file is \
+             missing, the task fails.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+    options.insert(
+        "backup".to_string(),
+        opt(
+            "Reserved for future use; currently accepted but ignored.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("path".to_string(), ret("Path that was managed.", "str", "/etc/hosts"));
+    return_values.insert("changed".to_string(), ret("Whether the file was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.lineinfile".to_string(),
+        short_description: "Ensure a particular line is present or absent in a file".to_string(),
+        description: "lineinfile maintains a single line in a target file. Use it for \
+            small, targeted edits — toggling a kernel sysctl, adding a host alias, \
+            ensuring a config flag has a particular value.\n\n\
+            With `state = \"present\"`, if `regexp` matches an existing line that line \
+            is replaced by `line`; otherwise the new line is inserted (at \
+            `insertbefore` / `insertafter`, or appended). With `state = \"absent\"`, \
+            matching lines are removed.\n\n\
+            For multi-line edits prefer `blockinfile`. For wholesale file management \
+            prefer `template` or `copy`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Ensure a line exists",
+                "Append the line if not already present.",
+                "[[plays.tasks]]\nname = \"keep selinux disabled\"\nlineinfile = { path = \"/etc/selinux/config\", line = \"SELINUX=disabled\", regexp = \"^SELINUX=\" }\n",
+            ),
+            example(
+                "Remove a line",
+                "Strip any line matching the regexp.",
+                "[[plays.tasks]]\nname = \"drop legacy alias\"\nlineinfile = { path = \"/etc/hosts\", regexp = \"oldhost\\\\.example\\\\.com\", state = \"absent\" }\n",
+            ),
+            example(
+                "Insert before a marker",
+                "Place the new line before the first matching anchor.",
+                "[[plays.tasks]]\nname = \"add include\"\nlineinfile = { path = \"/etc/myapp.conf\", line = \"include /etc/myapp/extra.conf\", insertbefore = \"^# END\", create = true }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "The `regexp` matcher supports anchors (`^`, `$`) and literal substring matches; full regex is not yet supported.".to_string(),
+            "When `state = \"present\"` and `line` is omitted the task is rejected.".to_string(),
+            "`backup` is currently a no-op (accepted for forward compatibility).".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.blockinfile".to_string(),
+            "runsible_builtin.replace".to_string(),
+            "runsible_builtin.template".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.blockinfile
+// ---------------------------------------------------------------------------
+
+fn builtin_blockinfile() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt("Path to the file on the managed node.", "str", true, None),
+    );
+    options.insert(
+        "block".to_string(),
+        opt(
+            "Multi-line block content to manage between markers.",
+            "str",
+            false,
+            Some(""),
+        ),
+    );
+    options.insert(
+        "marker".to_string(),
+        opt(
+            "Marker template wrapping the block. The literal `{mark}` is \
+             replaced with `BEGIN` and `END` to produce the two boundary lines.",
+            "str",
+            false,
+            Some("# {mark} ANSIBLE MANAGED BLOCK"),
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Whether the block should be present or absent.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent"],
+        ),
+    );
+    options.insert(
+        "create".to_string(),
+        opt(
+            "Create the file if it does not exist.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("path".to_string(), ret("Path managed.", "str", "/etc/myapp.conf"));
+    return_values.insert("changed".to_string(), ret("Whether the file was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.blockinfile".to_string(),
+        short_description: "Maintain a marker-delimited block of text in a file".to_string(),
+        description: "blockinfile keeps a contiguous chunk of text bracketed by \
+            BEGIN/END markers in a target file. Re-running the task replaces \
+            the existing block (located by markers) with the new content; setting \
+            `state = \"absent\"` removes the entire block, markers and all.\n\n\
+            Use blockinfile when you need to manage several related lines as a unit \
+            (a vhost stanza, a hosts-file region, a generated section). For a \
+            single line use `lineinfile`; for full-file management use `template` \
+            or `copy`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Manage a hosts-file block",
+                "Drop a managed region into /etc/hosts.",
+                "[[plays.tasks]]\nname = \"managed hosts block\"\nblockinfile = { path = \"/etc/hosts\", block = \"10.0.0.10 db.internal\\n10.0.0.11 cache.internal\" }\n",
+            ),
+            example(
+                "Custom marker",
+                "Use a comment style appropriate for the file format.",
+                "[[plays.tasks]]\nname = \"sshd block\"\nblockinfile = { path = \"/etc/ssh/sshd_config\", marker = \"# {mark} runsible managed\", block = \"PermitRootLogin no\\nPasswordAuthentication no\" }\n",
+            ),
+            example(
+                "Remove the block",
+                "Idempotent removal of the entire region.",
+                "[[plays.tasks]]\nname = \"drop block\"\nblockinfile = { path = \"/etc/hosts\", state = \"absent\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "The marker template MUST contain `{mark}` so BEGIN/END boundary lines can be generated.".to_string(),
+            "If the file does not exist and `create = false`, the task fails rather than creating it.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.lineinfile".to_string(),
+            "runsible_builtin.template".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.replace
+// ---------------------------------------------------------------------------
+
+fn builtin_replace() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt("Path to the file on the managed node.", "str", true, None),
+    );
+    options.insert(
+        "regexp".to_string(),
+        opt(
+            "Pattern to match. Currently treated as a literal substring; \
+             full regex support is planned.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "replace".to_string(),
+        opt(
+            "Replacement text substituted for each match.",
+            "str",
+            false,
+            Some(""),
+        ),
+    );
+    options.insert(
+        "before".to_string(),
+        opt(
+            "Anchor; only replace text that occurs before the first match of \
+             this string.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "after".to_string(),
+        opt(
+            "Anchor; only replace text that occurs after the first match of \
+             this string.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("path".to_string(), ret("Path managed.", "str", "/etc/conf"));
+    return_values.insert("changed".to_string(), ret("Whether the file was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.replace".to_string(),
+        short_description: "Replace all occurrences of a pattern within a file".to_string(),
+        description: "replace performs a substring substitution across the entire \
+            file (or only the region between optional `after` / `before` anchors). \
+            Re-running with the same arguments is idempotent — once the pattern \
+            no longer matches, the task reports `ok` rather than `changed`.\n\n\
+            For single-line edits prefer `lineinfile`; for marker-delimited blocks \
+            use `blockinfile`. Note: in this milestone `regexp` is matched as a \
+            literal substring; a full regex engine is on the roadmap."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Substitute everywhere",
+                "Replace every literal occurrence in the file.",
+                "[[plays.tasks]]\nname = \"rebrand\"\nreplace = { path = \"/etc/banner\", regexp = \"OLDCO\", replace = \"NEWCO\" }\n",
+            ),
+            example(
+                "Bounded substitution",
+                "Only edit the region between two anchors.",
+                "[[plays.tasks]]\nname = \"between markers\"\nreplace = { path = \"/etc/myapp.conf\", regexp = \"DEBUG\", replace = \"INFO\", after = \"# BEGIN\", before = \"# END\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Current matcher is literal substring; anchors `^`/`$` and full regex are not yet supported.".to_string(),
+            "If the file does not exist the task is a silent no-op (will_change = false).".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.lineinfile".to_string(),
+            "runsible_builtin.blockinfile".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.stat
+// ---------------------------------------------------------------------------
+
+fn builtin_stat() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt("Path to inspect on the managed node.", "str", true, None),
+    );
+    options.insert(
+        "checksum_algorithm".to_string(),
+        opt_choices(
+            "Hash algorithm used when `get_checksum = true`.",
+            "str",
+            false,
+            Some("sha256"),
+            &["sha256", "sha1", "md5", "sha512"],
+        ),
+    );
+    options.insert(
+        "get_checksum".to_string(),
+        opt(
+            "When true (and the path is a regular file) compute and return a checksum.",
+            "bool",
+            false,
+            Some("true"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert(
+        "stat".to_string(),
+        ret(
+            "Dict describing the path: exists, path, size, mode, isdir, isfile, islnk, mtime, kind, and (optionally) checksum + checksum_algorithm.",
+            "table",
+            "{ exists = true, path = \"/etc/hosts\", size = 220, mode = \"644\", isfile = true, mtime = 1700000000 }",
+        ),
+    );
+    return_values.insert("exists".to_string(), ret("Whether the path exists. Mirrors `stat.exists` for convenience.", "bool", "true"));
+    return_values.insert("size".to_string(), ret("Size in bytes (0 if missing).", "int", "220"));
+
+    ModuleDoc {
+        name: "runsible_builtin.stat".to_string(),
+        short_description: "Inspect a path on the managed node".to_string(),
+        description: "stat is read-only — it returns a dict describing whether \
+            a path exists and (when it does) its size, mode, kind, mtime, and an \
+            optional content checksum.\n\n\
+            Use stat as a precondition for downstream tasks: register the result \
+            and consult fields like `stat.exists`, `stat.isdir`, or \
+            `stat.checksum` from a `when:` expression. Because stat does not \
+            mutate state it is always check-mode safe."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Check whether a file exists",
+                "Register the result and branch on it.",
+                "[[plays.tasks]]\nname = \"check marker\"\nstat = { path = \"/var/lib/app/initialized\" }\nregister = \"marker\"\n\n[[plays.tasks]]\nname = \"first-time init\"\ncommand = { cmd = \"/usr/local/bin/initialize\" }\nwhen = \"not marker.stat.exists\"\n",
+            ),
+            example(
+                "Capture a checksum",
+                "Use a different hash algorithm.",
+                "[[plays.tasks]]\nname = \"hash binary\"\nstat = { path = \"/usr/local/bin/myapp\", checksum_algorithm = \"sha512\" }\nregister = \"appbin\"\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "stat shells out to the `stat` command on the managed node and (optionally) `sha256sum`/`sha1sum`/`md5sum`/`sha512sum`.".to_string(),
+            "Checksum is only computed for regular files.".to_string(),
+            "The module never modifies host state; will_change is always false.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.find".to_string(),
+            "runsible_builtin.file".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.find
+// ---------------------------------------------------------------------------
+
+fn builtin_find() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "paths".to_string(),
+        opt(
+            "Directory or list of directories to search.",
+            "str or list of str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "patterns".to_string(),
+        opt(
+            "Glob(s) to match filenames against. Wrapped in `\\( -name p1 -o -name p2 \\)`.",
+            "str or list of str",
+            false,
+            Some("*"),
+        ),
+    );
+    options.insert(
+        "recurse".to_string(),
+        opt(
+            "Recurse into subdirectories. When false, `-maxdepth 1` is used.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+    options.insert(
+        "file_type".to_string(),
+        opt_choices(
+            "Restrict to a particular kind of entry.",
+            "str",
+            false,
+            Some("file"),
+            &["file", "directory", "link", "any"],
+        ),
+    );
+    options.insert(
+        "age".to_string(),
+        opt(
+            "Minimum age expressed as `<n><unit>`, e.g. \"7d\", \"2w\", \"30m\". \
+             Translated to `find -mtime +N` (in days).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "size".to_string(),
+        opt(
+            "Minimum size expressed as `<n><unit>`, e.g. \"10k\", \"1M\", \"2G\".",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert(
+        "files".to_string(),
+        ret(
+            "List of `{ path = \"…\" }` entries for each match.",
+            "list of table",
+            "[{ path = \"/var/log/syslog\" }]",
+        ),
+    );
+    return_values.insert("matched".to_string(), ret("Number of entries returned.", "int", "1"));
+    return_values.insert("examined".to_string(), ret("Number of paths examined (== matched in M1).", "int", "1"));
+
+    ModuleDoc {
+        name: "runsible_builtin.find".to_string(),
+        short_description: "List paths under one or more directories matching criteria".to_string(),
+        description: "find shells out to the host's `find(1)` and returns a list of \
+            paths matching the supplied filters. It is read-only; the resulting \
+            list is intended to be registered and iterated over (e.g. to feed a \
+            cleanup loop, or pipe through a `file` task).\n\n\
+            All filters compose: `paths` × `patterns` × `file_type` × `age` × `size`. \
+            Set `recurse = true` to descend into subdirectories."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Find old log files",
+                "Match name + age in one go.",
+                "[[plays.tasks]]\nname = \"old logs\"\nfind = { paths = \"/var/log\", patterns = [\"*.log\", \"*.gz\"], age = \"30d\" }\nregister = \"old\"\n",
+            ),
+            example(
+                "Find all directories under a prefix",
+                "Recursive, type-restricted lookup.",
+                "[[plays.tasks]]\nname = \"all dirs\"\nfind = { paths = \"/srv/data\", file_type = \"directory\", recurse = true }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "find shells out to `find(1)`; behavior matches that command on the managed node.".to_string(),
+            "`age` is normalized to days for the underlying `-mtime +N` argument.".to_string(),
+            "Read-only — the module never mutates host state.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.stat".to_string(),
+            "runsible_builtin.file".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.fail
+// ---------------------------------------------------------------------------
+
+fn builtin_fail() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "msg".to_string(),
+        opt(
+            "Failure message recorded in the task result.",
+            "str",
+            false,
+            Some("Failed as requested"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("failed".to_string(), ret("Always true on the failure path.", "bool", "true"));
+    return_values.insert("msg".to_string(), ret("The failure message.", "str", "precondition not met"));
+
+    ModuleDoc {
+        name: "runsible_builtin.fail".to_string(),
+        short_description: "Fail the play with an explicit message".to_string(),
+        description: "fail unconditionally fails the current task. Combine with \
+            `when:` to bail out of a play when a precondition isn't met — for \
+            example, when a required fact is missing or an unsupported OS is \
+            detected.\n\n\
+            For boolean invariant checks `assert` is usually a better fit \
+            because it accepts a list of expressions. Use `fail` when the \
+            decision logic lives in `when:` and you just need a hard stop \
+            with a custom message."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Bail out conditionally",
+                "Use a when-guard to gate the failure.",
+                "[[plays.tasks]]\nname = \"refuse to run on debian < 12\"\nfail = { msg = \"Debian 12 or newer required\" }\nwhen = \"ansible_distribution == 'Debian' and ansible_distribution_major_version|int < 12\"\n",
+            ),
+            example(
+                "Default message",
+                "msg is optional — a generic message is used when omitted.",
+                "[[plays.tasks]]\nname = \"unconditional failure\"\nfail = {}\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "fail always returns Failed status — pair it with a `when:` to make the failure conditional.".to_string(),
+            "Use `assert` when the failure is driven by boolean expressions instead of a `when:` guard.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.assert".to_string(),
+            "runsible_builtin.debug".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.pause
+// ---------------------------------------------------------------------------
+
+fn builtin_pause() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "seconds".to_string(),
+        opt(
+            "Pause duration in seconds. Mutually exclusive with `minutes`.",
+            "int",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "minutes".to_string(),
+        opt(
+            "Pause duration in minutes. Multiplied by 60 if `seconds` is not set.",
+            "int",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "prompt".to_string(),
+        opt(
+            "Optional prompt string. Logged with the pause; in this milestone \
+             the runtime does NOT actually wait for keyboard input.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("paused_seconds".to_string(), ret("Number of seconds the task slept.", "int", "5"));
+    return_values.insert("prompt".to_string(), ret("The prompt string, if any.", "str", "press enter"));
+
+    ModuleDoc {
+        name: "runsible_builtin.pause".to_string(),
+        short_description: "Sleep for a fixed duration during a play".to_string(),
+        description: "pause introduces a deliberate delay in the play. Use it to \
+            give an external system time to settle (e.g. after restarting a \
+            service that takes a while to come back) or to space out batched \
+            operations.\n\n\
+            Provide either `seconds` or `minutes` (seconds wins if both are \
+            given). The optional `prompt` is recorded but, in this milestone, \
+            the runtime does not block on keyboard input — pause is always \
+            duration-driven."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Sleep for 5 seconds",
+                "Quick spacer between two tasks.",
+                "[[plays.tasks]]\nname = \"settle\"\npause = { seconds = 5 }\n",
+            ),
+            example(
+                "Longer wait via minutes",
+                "Use minutes for human-readable waits.",
+                "[[plays.tasks]]\nname = \"wait for cluster heal\"\npause = { minutes = 2, prompt = \"giving the cluster time to recover\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "If both `seconds` and `minutes` are 0/missing, the task returns immediately.".to_string(),
+            "Interactive prompts are NOT yet implemented — `prompt` is logged but the run does not wait for input.".to_string(),
+            "pause is always check-mode safe (will_change = false).".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.wait_for".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.wait_for
+// ---------------------------------------------------------------------------
+
+fn builtin_wait_for() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "host".to_string(),
+        opt(
+            "Hostname or IP for port-mode probes.",
+            "str",
+            false,
+            Some("localhost"),
+        ),
+    );
+    options.insert(
+        "port".to_string(),
+        opt(
+            "TCP port to probe. Triggers port-mode. One of `port` or `path` is required.",
+            "int",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "path".to_string(),
+        opt(
+            "Filesystem path to probe. Triggers file-mode. One of `port` or `path` is required.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Condition to wait for. `started`/`present` mean reachable; \
+             `stopped`/`absent` mean unreachable / missing.",
+            "str",
+            false,
+            Some("started"),
+            &["started", "stopped", "present", "absent"],
+        ),
+    );
+    options.insert(
+        "timeout".to_string(),
+        opt(
+            "Overall timeout in seconds before the task fails.",
+            "int",
+            false,
+            Some("300"),
+        ),
+    );
+    options.insert(
+        "delay".to_string(),
+        opt(
+            "Initial sleep before the first probe (seconds).",
+            "int",
+            false,
+            Some("0"),
+        ),
+    );
+    options.insert(
+        "connect_timeout".to_string(),
+        opt(
+            "Per-probe TCP connect timeout in seconds (port-mode only).",
+            "int",
+            false,
+            Some("5"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("matched".to_string(), ret("True when the wait condition was met.", "bool", "true"));
+    return_values.insert("elapsed_seconds".to_string(), ret("How long the wait took.", "int", "12"));
+
+    ModuleDoc {
+        name: "runsible_builtin.wait_for".to_string(),
+        short_description: "Poll until a TCP port is reachable or a path exists".to_string(),
+        description: "wait_for blocks the play until a TCP port becomes reachable \
+            (port-mode, default) or a filesystem path comes into the desired state \
+            (file-mode). Useful after starting services that take time to bind, \
+            or while waiting for an external system to drop a marker file.\n\n\
+            Exactly one of `port` or `path` must be supplied. The task succeeds \
+            when the condition is met within `timeout` seconds, or fails with a \
+            timeout error otherwise. Probing happens roughly every 250ms."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Wait for SSH to come up",
+                "Block until port 22 accepts a TCP connection.",
+                "[[plays.tasks]]\nname = \"ssh up\"\nwait_for = { host = \"db.example.com\", port = 22, timeout = 120 }\n",
+            ),
+            example(
+                "Wait for a marker file",
+                "File-mode probe.",
+                "[[plays.tasks]]\nname = \"wait for ready\"\nwait_for = { path = \"/var/run/myapp.ready\", state = \"present\", timeout = 60 }\n",
+            ),
+            example(
+                "Wait for a port to close",
+                "Service-down probe.",
+                "[[plays.tasks]]\nname = \"old proc gone\"\nwait_for = { port = 8080, state = \"stopped\", timeout = 30 }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Exactly one of `port` or `path` must be set; the task is rejected otherwise.".to_string(),
+            "Port-mode probes connect from the controller (or wherever the play runs), not from the managed node.".to_string(),
+            "Polling cadence is ~250ms; total runtime is bounded by `timeout`.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.pause".to_string(),
+            "runsible_builtin.uri".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.uri
+// ---------------------------------------------------------------------------
+
+fn builtin_uri() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "url".to_string(),
+        opt("URL to call.", "str", true, None),
+    );
+    options.insert(
+        "method".to_string(),
+        opt(
+            "HTTP method.",
+            "str",
+            false,
+            Some("GET"),
+        ),
+    );
+    options.insert(
+        "body".to_string(),
+        opt(
+            "Request body. Combined with `body_format` to choose framing.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "body_format".to_string(),
+        opt_choices(
+            "How the body is sent: raw bytes, form-urlencoded, or JSON \
+             (which also adds a Content-Type header if not already supplied).",
+            "str",
+            false,
+            Some("raw"),
+            &["raw", "json", "form"],
+        ),
+    );
+    options.insert(
+        "status_code".to_string(),
+        opt(
+            "Expected HTTP status code or list of acceptable codes. Anything \
+             outside the allow-list fails the task.",
+            "int or list of int",
+            false,
+            Some("[200]"),
+        ),
+    );
+    options.insert(
+        "headers".to_string(),
+        opt(
+            "Extra request headers as a TOML table.",
+            "table",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "return_content".to_string(),
+        opt(
+            "Include the response body in the task result. JSON bodies are also \
+             surfaced under a parsed `json` key when valid.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Optional path to write the response body to.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("status".to_string(), ret("HTTP status code returned by the server.", "int", "200"));
+    return_values.insert("url".to_string(), ret("URL that was called.", "str", "https://example.com/api"));
+    return_values.insert("content".to_string(), ret("Response body (only when `return_content = true`).", "str", "{\"ok\":true}"));
+    return_values.insert("json".to_string(), ret("Parsed JSON response (only when the body is valid JSON and `return_content = true`).", "table", "{ ok = true }"));
+
+    ModuleDoc {
+        name: "runsible_builtin.uri".to_string(),
+        short_description: "Make an HTTP request and check the response code".to_string(),
+        description: "uri performs an HTTP/HTTPS request to `url` using the host's \
+            `curl` binary, then validates the response status against `status_code`.\n\n\
+            Use uri for talking to APIs from a play — health-check probes, \
+            kicking off remote jobs, or fetching content into a destination \
+            file. For pure file downloads `get_url` is usually a better fit \
+            because it handles checksums and atomic writes."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Health-check a service",
+                "Verify a URL returns 200 OK.",
+                "[[plays.tasks]]\nname = \"hit /healthz\"\nuri = { url = \"https://api.example.com/healthz\", status_code = [200] }\n",
+            ),
+            example(
+                "POST JSON",
+                "Send structured data with auto Content-Type.",
+                "[[plays.tasks]]\nname = \"trigger build\"\nuri = { url = \"https://ci.example.com/api/build\", method = \"POST\", body = '{\"branch\":\"main\"}', body_format = \"json\", status_code = [200, 201, 202] }\n",
+            ),
+            example(
+                "Capture response",
+                "Read JSON output into a registered variable.",
+                "[[plays.tasks]]\nname = \"fetch token\"\nuri = { url = \"https://auth.example.com/token\", method = \"POST\", return_content = true }\nregister = \"tok\"\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "uri shells out to `curl` on the managed node. If curl is not installed the task fails at preflight.".to_string(),
+            "TLS verification follows curl's defaults; pin `headers` and `status_code` carefully when consuming untrusted endpoints.".to_string(),
+            "For binary downloads with checksum validation prefer `get_url`.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.get_url".to_string(),
+            "runsible_builtin.wait_for".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.archive
+// ---------------------------------------------------------------------------
+
+fn builtin_archive() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "path".to_string(),
+        opt(
+            "File or directory (or list of either) to archive.",
+            "str or list of str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Destination archive path on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "format".to_string(),
+        opt_choices(
+            "Archive format. `gz`/`bz2`/`xz`/`tar` use `tar(1)`; `zip` uses `zip(1)`.",
+            "str",
+            false,
+            Some("gz"),
+            &["gz", "bz2", "xz", "zip", "tar"],
+        ),
+    );
+    options.insert(
+        "remove".to_string(),
+        opt(
+            "Remove the original sources after a successful archive.",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("dest".to_string(), ret("Path of the resulting archive.", "str", "/tmp/backup.tar.gz"));
+    return_values.insert("format".to_string(), ret("Format used.", "str", "gz"));
+    return_values.insert("changed".to_string(), ret("Whether a new archive was produced.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.archive".to_string(),
+        short_description: "Create a tar/zip archive on the managed node".to_string(),
+        description: "archive bundles one or more paths into `dest`. The format \
+            argument selects the underlying tool: `gz`/`bz2`/`xz`/`tar` invoke \
+            `tar(1)`, while `zip` invokes `zip(1)`.\n\n\
+            archive is idempotent in the simple sense — if `dest` already \
+            exists the task is `ok` and nothing is recreated. Set `remove = true` \
+            to delete the source paths after a successful archive."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Tarball a directory",
+                "Default gzip-compressed tarball.",
+                "[[plays.tasks]]\nname = \"backup\"\narchive = { path = \"/srv/data\", dest = \"/var/backups/srv-data.tar.gz\" }\n",
+            ),
+            example(
+                "Zip multiple paths",
+                "Pass an explicit list and pick zip format.",
+                "[[plays.tasks]]\nname = \"bundle configs\"\narchive = { path = [\"/etc/myapp\", \"/var/log/myapp\"], dest = \"/tmp/myapp.zip\", format = \"zip\" }\n",
+            ),
+            example(
+                "Archive then delete sources",
+                "Useful for log rotation flows.",
+                "[[plays.tasks]]\nname = \"rotate\"\narchive = { path = \"/var/log/myapp/old\", dest = \"/var/log/myapp/old-2026-04.tar.gz\", remove = true }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Idempotence is by destination existence: archive does not re-create when `dest` is already present, even if the source content has changed.".to_string(),
+            "`remove = true` deletes the source paths only after a successful archive run.".to_string(),
+            "Requires `tar` (and `zip` for the zip format) on the managed node.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.unarchive".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.unarchive
+// ---------------------------------------------------------------------------
+
+fn builtin_unarchive() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "src".to_string(),
+        opt(
+            "Path to the archive on the managed node.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "dest".to_string(),
+        opt(
+            "Destination directory. Created with `mkdir -p` if missing.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "remote_src".to_string(),
+        opt(
+            "Whether `src` is already on the managed node. In this milestone \
+             this is always treated as true.",
+            "bool",
+            false,
+            Some("true"),
+        ),
+    );
+    options.insert(
+        "creates".to_string(),
+        opt(
+            "If this path exists the task is skipped (idempotency marker).",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("src".to_string(), ret("Archive that was extracted.", "str", "/tmp/data.tar.gz"));
+    return_values.insert("dest".to_string(), ret("Directory the archive was extracted into.", "str", "/srv/data"));
+    return_values.insert("changed".to_string(), ret("Whether the archive was extracted on this run.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.unarchive".to_string(),
+        short_description: "Extract a tar/zip archive on the managed node".to_string(),
+        description: "unarchive extracts `src` into `dest`. The extractor is \
+            picked from the archive's filename suffix: `.zip` uses `unzip`; \
+            `.tar.gz`/`.tgz`/`.tar.bz2`/`.tbz2`/`.tar.xz`/`.txz`/`.tar` use the \
+            corresponding `tar` flags.\n\n\
+            Use the `creates` argument for idempotence: if the marker path exists \
+            the task is skipped. Otherwise re-running unarchive will re-extract \
+            the archive."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Extract a tarball",
+                "Idempotent via a marker file.",
+                "[[plays.tasks]]\nname = \"deploy data\"\nunarchive = { src = \"/tmp/data.tar.gz\", dest = \"/srv/data\", creates = \"/srv/data/.deployed\" }\n",
+            ),
+            example(
+                "Extract a zip",
+                "Format detected from the .zip suffix.",
+                "[[plays.tasks]]\nname = \"unpack release\"\nunarchive = { src = \"/tmp/release.zip\", dest = \"/opt/release\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "`remote_src` is currently always-on; controller-side archives are not yet supported.".to_string(),
+            "Format is detected from the file extension; archives without a recognized suffix fall back to `tar xf`.".to_string(),
+            "Without `creates` the module is NOT idempotent — extraction will re-run on every play.".to_string(),
+            "Requires the relevant extractor (`tar`, `unzip`) on the managed node.".to_string(),
+        ],
+        see_also: vec![
+            "runsible_builtin.archive".to_string(),
+            "runsible_builtin.get_url".to_string(),
+        ],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.user
+// ---------------------------------------------------------------------------
+
+fn builtin_user() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt("Login name of the account.", "str", true, None),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Whether the account should exist or not.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent"],
+        ),
+    );
+    options.insert(
+        "uid".to_string(),
+        opt(
+            "Numeric user ID. Passed to `useradd -u`.",
+            "int",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "group".to_string(),
+        opt(
+            "Primary group (passed to `useradd -g`).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "groups".to_string(),
+        opt(
+            "List of supplementary groups (joined with commas for `useradd -G`).",
+            "list of str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "shell".to_string(),
+        opt(
+            "Login shell (passed to `useradd -s`).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "home".to_string(),
+        opt(
+            "Home directory path (passed to `useradd -d`).",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "password".to_string(),
+        opt(
+            "Pre-hashed password to set via `useradd -p`. The value is used \
+             as-is — supply a crypt-style hash, NOT a plaintext password.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "system".to_string(),
+        opt(
+            "Create a system account (passed to `useradd -r`).",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+    options.insert(
+        "create_home".to_string(),
+        opt(
+            "When true, pass `-m` so the home directory is created.",
+            "bool",
+            false,
+            Some("true"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Account name.", "str", "alice"));
+    return_values.insert("state".to_string(), ret("Account state after the action.", "str", "present"));
+    return_values.insert("changed".to_string(), ret("Whether the account was created or removed.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.user".to_string(),
+        short_description: "Create or remove a Unix user account".to_string(),
+        description: "user manages a single Unix account by shelling out to \
+            `useradd` (for create) or `userdel -r` (for remove). Existence is \
+            detected via `getent passwd`.\n\n\
+            **In this milestone user only handles creation/removal — it does \
+            NOT reconcile attributes on an existing account.** If the account \
+            already exists the task is `ok` regardless of whether `uid`/`shell`/etc. \
+            differ. Use `command` with `usermod` for incremental updates until \
+            full reconciliation lands."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Create a service account",
+                "System account with no home and a custom shell.",
+                "[[plays.tasks]]\nname = \"app account\"\nuser = { name = \"myapp\", system = true, shell = \"/usr/sbin/nologin\", create_home = false }\n",
+            ),
+            example(
+                "Create a regular user",
+                "Default home directory, supplementary groups.",
+                "[[plays.tasks]]\nname = \"add alice\"\nuser = { name = \"alice\", uid = 2001, shell = \"/bin/bash\", groups = [\"sudo\", \"docker\"] }\n",
+            ),
+            example(
+                "Remove an account",
+                "Calls userdel -r so the home directory is purged too.",
+                "[[plays.tasks]]\nname = \"drop bob\"\nuser = { name = \"bob\", state = \"absent\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Requires root (or appropriate `become`) — `useradd`/`userdel` need privileges.".to_string(),
+            "Reconciliation of attributes on existing accounts is NOT yet implemented.".to_string(),
+            "`password` must be a pre-hashed crypt(3) value — never pass plaintext.".to_string(),
+            "`userdel -r` is invoked for removal; this purges the user's home directory and mail spool.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.group".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.group
+// ---------------------------------------------------------------------------
+
+fn builtin_group() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt("Group name.", "str", true, None),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Whether the group should exist or not.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent"],
+        ),
+    );
+    options.insert(
+        "gid".to_string(),
+        opt(
+            "Numeric group ID (passed to `groupadd -g`).",
+            "int",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "system".to_string(),
+        opt(
+            "Create a system group (passed to `groupadd -r`).",
+            "bool",
+            false,
+            Some("false"),
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Group name.", "str", "wheel"));
+    return_values.insert("state".to_string(), ret("Group state after the action.", "str", "present"));
+    return_values.insert("changed".to_string(), ret("Whether the group was created or removed.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.group".to_string(),
+        short_description: "Create or remove a Unix group".to_string(),
+        description: "group manages a single Unix group by shelling out to \
+            `groupadd` (create) or `groupdel` (remove). Existence is detected \
+            via `getent group`.\n\n\
+            Like `user`, this milestone's group module only creates/removes — \
+            it does NOT reconcile attributes such as `gid` on an existing group. \
+            For incremental updates use `command` with `groupmod`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Create a system group",
+                "Fixed gid for predictable cross-host membership.",
+                "[[plays.tasks]]\nname = \"app group\"\ngroup = { name = \"myapp\", gid = 1500, system = true }\n",
+            ),
+            example(
+                "Remove a group",
+                "Idempotent — does nothing if the group is already absent.",
+                "[[plays.tasks]]\nname = \"drop legacy\"\ngroup = { name = \"oldgroup\", state = \"absent\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Requires root (or appropriate `become`) — `groupadd`/`groupdel` need privileges.".to_string(),
+            "Reconciliation of attributes (gid changes) on existing groups is NOT yet implemented.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.user".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.cron
+// ---------------------------------------------------------------------------
+
+fn builtin_cron() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt(
+            "Marker name. Recorded as `# Ansible: <name>` immediately above the \
+             cron entry, and used to identify the entry on subsequent runs.",
+            "str",
+            true,
+            None,
+        ),
+    );
+    options.insert(
+        "state".to_string(),
+        opt_choices(
+            "Whether the entry should be present or absent.",
+            "str",
+            false,
+            Some("present"),
+            &["present", "absent"],
+        ),
+    );
+    options.insert(
+        "user".to_string(),
+        opt(
+            "Owning user's crontab (`crontab -u <user>`). Defaults to the user \
+             the play is running as.",
+            "str",
+            false,
+            None,
+        ),
+    );
+    options.insert(
+        "minute".to_string(),
+        opt("Minute field of the cron entry.", "str", false, Some("*")),
+    );
+    options.insert(
+        "hour".to_string(),
+        opt("Hour field.", "str", false, Some("*")),
+    );
+    options.insert(
+        "day".to_string(),
+        opt("Day-of-month field.", "str", false, Some("*")),
+    );
+    options.insert(
+        "month".to_string(),
+        opt("Month field.", "str", false, Some("*")),
+    );
+    options.insert(
+        "weekday".to_string(),
+        opt("Day-of-week field.", "str", false, Some("*")),
+    );
+    options.insert(
+        "job".to_string(),
+        opt(
+            "Command line to run. Required when `state = \"present\"`.",
+            "str",
+            false,
+            None,
+        ),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Marker name of the managed entry.", "str", "nightly-backup"));
+    return_values.insert("changed".to_string(), ret("Whether the crontab was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.cron".to_string(),
+        short_description: "Manage entries in a user's crontab".to_string(),
+        description: "cron adds, replaces, or removes a single entry in a user's \
+            crontab. Each managed entry is preceded by a marker line of the form \
+            `# Ansible: <name>` so subsequent runs can locate and update it \
+            in place — same convention as the upstream Ansible module.\n\n\
+            The module reads the current crontab (`crontab -l`), splices in the \
+            desired entry (or removes it), and pipes the result back through \
+            `crontab -`. Setting `state = \"present\"` requires `job`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Daily backup job",
+                "Marker name keeps the entry idempotent across runs.",
+                "[[plays.tasks]]\nname = \"nightly backup\"\ncron = { name = \"nightly-backup\", minute = \"0\", hour = \"3\", job = \"/usr/local/bin/backup.sh\" }\n",
+            ),
+            example(
+                "Remove a managed entry",
+                "Located by marker, removed atomically.",
+                "[[plays.tasks]]\nname = \"drop legacy job\"\ncron = { name = \"old-cleanup\", state = \"absent\" }\n",
+            ),
+            example(
+                "Crontab for another user",
+                "Uses crontab -u to manage another account.",
+                "[[plays.tasks]]\nname = \"alice rotation\"\ncron = { name = \"rotate-logs\", user = \"alice\", minute = \"30\", hour = \"2\", weekday = \"0\", job = \"/usr/local/bin/rotate.sh\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Each managed entry is identified by `# Ansible: <name>` — keep names stable across runs to maintain idempotency.".to_string(),
+            "Managing another user's crontab requires root.".to_string(),
+            "`job` is required when `state = \"present\"`; the task is rejected otherwise.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.systemd_service".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// runsible_builtin.hostname
+// ---------------------------------------------------------------------------
+
+fn builtin_hostname() -> ModuleDoc {
+    let mut options = IndexMap::new();
+    options.insert(
+        "name".to_string(),
+        opt("Desired hostname.", "str", true, None),
+    );
+
+    let mut return_values = IndexMap::new();
+    return_values.insert("name".to_string(), ret("Hostname after the action.", "str", "web01"));
+    return_values.insert("changed".to_string(), ret("Whether the hostname was modified.", "bool", "true"));
+
+    ModuleDoc {
+        name: "runsible_builtin.hostname".to_string(),
+        short_description: "Set the system hostname".to_string(),
+        description: "hostname sets the managed node's hostname to `name`. The \
+            module prefers `hostnamectl set-hostname` when available and falls \
+            back to writing `/etc/hostname` plus running `hostname <name>` on \
+            systems without systemd.\n\n\
+            Idempotence is by comparison: the current hostname is read first, \
+            and the task is `ok` (no change) when it already matches `name`."
+            .to_string(),
+        version_added: "0.0.1".to_string(),
+        author: vec!["runsible builtin".to_string()],
+        options,
+        examples: vec![
+            example(
+                "Set the hostname",
+                "Standard usage; idempotent if already set.",
+                "[[plays.tasks]]\nname = \"set hostname\"\nhostname = { name = \"web01\" }\n",
+            ),
+        ],
+        return_values,
+        notes: vec![
+            "Requires root (or `become`) — setting the hostname is a privileged operation.".to_string(),
+            "Prefers `hostnamectl` when available; falls back to writing `/etc/hostname` + `hostname` for non-systemd hosts.".to_string(),
+            "Only the live hostname and `/etc/hostname` are managed; cloud-init or DHCP overrides are NOT reconciled.".to_string(),
+        ],
+        see_also: vec!["runsible_builtin.command".to_string()],
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TRIPLE SIMS gate
 // ---------------------------------------------------------------------------
 
@@ -1472,25 +2944,22 @@ pub fn f30() -> i32 {
         return 7;
     }
 
-    // All 13 originally-documented builtins must be in the registry. Note:
-    // 15 newer modules (lineinfile, blockinfile, replace, stat, find, fail,
-    // pause, wait_for, uri, archive, unarchive, user, group, cron, hostname)
-    // are still undocumented per the gap analysis; this gate locks in the
-    // first cohort and will fail if any of them regress.
+    // All 28 documented builtins must be in the registry.
     let documented = [
-        "runsible_builtin.debug",
-        "runsible_builtin.ping",
-        "runsible_builtin.set_fact",
-        "runsible_builtin.assert",
-        "runsible_builtin.command",
-        "runsible_builtin.shell",
-        "runsible_builtin.copy",
-        "runsible_builtin.file",
-        "runsible_builtin.template",
-        "runsible_builtin.package",
-        "runsible_builtin.service",
-        "runsible_builtin.systemd_service",
-        "runsible_builtin.get_url",
+        "runsible_builtin.debug", "runsible_builtin.ping",
+        "runsible_builtin.set_fact", "runsible_builtin.assert",
+        "runsible_builtin.command", "runsible_builtin.shell",
+        "runsible_builtin.copy", "runsible_builtin.file",
+        "runsible_builtin.template", "runsible_builtin.package",
+        "runsible_builtin.service", "runsible_builtin.systemd_service",
+        "runsible_builtin.get_url", "runsible_builtin.lineinfile",
+        "runsible_builtin.blockinfile", "runsible_builtin.replace",
+        "runsible_builtin.stat", "runsible_builtin.find",
+        "runsible_builtin.fail", "runsible_builtin.pause",
+        "runsible_builtin.wait_for", "runsible_builtin.uri",
+        "runsible_builtin.archive", "runsible_builtin.unarchive",
+        "runsible_builtin.user", "runsible_builtin.group",
+        "runsible_builtin.cron", "runsible_builtin.hostname",
     ];
     for name in &documented {
         let doc = match reg.get(name) {
@@ -1826,6 +3295,25 @@ mod tests {
             "registry should hold ≥ 13 builtin docs; got {}",
             reg.list().len()
         );
+    }
+
+    // ── New: every one of the 28 builtins (13 original + 15 new) is documented
+    #[test]
+    fn all_28_builtins_documented() {
+        let reg = DocRegistry::builtins();
+        let names = [
+            "lineinfile", "blockinfile", "replace", "stat", "find",
+            "fail", "pause", "wait_for", "uri", "archive",
+            "unarchive", "user", "group", "cron", "hostname",
+        ];
+        for n in names {
+            let fq = format!("runsible_builtin.{n}");
+            let doc = reg.get(&fq).expect(&format!("doc missing: {fq}"));
+            assert!(!doc.short_description.is_empty(), "{fq} short_description empty");
+            assert!(!doc.options.is_empty() || matches!(n, "fail" | "pause"),
+                "{fq} should have options (or be one of the trivially-no-arg modules)");
+            assert!(!doc.examples.is_empty(), "{fq} examples empty");
+        }
     }
 
     // ── New: empty options + empty examples renders without panic ──────────

@@ -2,13 +2,14 @@
 // Contributors: Cochran Block
 //! runsible-inventory CLI — Ansible-compatible dynamic-inventory emitter.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use runsible_inventory::{
-    hosts_matching, merge_inventories, parse_inventory, parse_pattern, to_ansible_host_json,
-    to_ansible_list_json, Inventory,
+    hosts_matching, merge_inventories, parse_inventory_from_ini, parse_inventory_from_yaml,
+    parse_inventory_with_dirs, parse_pattern, to_ansible_host_json, to_ansible_list_json,
+    Inventory,
 };
 
 #[derive(Parser, Debug)]
@@ -35,6 +36,31 @@ struct Cli {
     host: Option<String>,
 }
 
+/// Resolve a `--inventory <PATH>` argument to a (file, inventory_dir) pair.
+///
+/// * If `path` is a directory, look for `<path>/hosts.toml` or
+///   `<path>/inventory.toml` (in that order) as the canonical inventory
+///   document, and use `<path>` itself as the `inventory_dir` for
+///   `group_vars/` and `host_vars/` scanning.
+/// * If `path` is a file, treat it as the inventory document and use
+///   its parent directory (if any) as `inventory_dir`.
+fn resolve_inventory_path(path: &Path) -> Result<(PathBuf, Option<PathBuf>)> {
+    if path.is_dir() {
+        for candidate in ["hosts.toml", "inventory.toml"] {
+            let cand = path.join(candidate);
+            if cand.is_file() {
+                return Ok((cand, Some(path.to_path_buf())));
+            }
+        }
+        anyhow::bail!(
+            "inventory directory {} does not contain hosts.toml or inventory.toml",
+            path.display()
+        );
+    }
+    let dir = path.parent().map(|p| p.to_path_buf()).filter(|p| !p.as_os_str().is_empty());
+    Ok((path.to_path_buf(), dir))
+}
+
 fn load_inventories(paths: &[PathBuf]) -> Result<Inventory> {
     if paths.is_empty() {
         anyhow::bail!("No inventory file specified. Use -i/--inventory <path>.");
@@ -42,11 +68,30 @@ fn load_inventories(paths: &[PathBuf]) -> Result<Inventory> {
 
     let mut merged: Option<Inventory> = None;
 
-    for path in paths {
-        let src = std::fs::read_to_string(path)
+    for raw_path in paths {
+        let (path, inv_dir) = resolve_inventory_path(raw_path)?;
+
+        let src = std::fs::read_to_string(&path)
             .with_context(|| format!("reading inventory file {}", path.display()))?;
-        let inv = parse_inventory(&src)
-            .with_context(|| format!("parsing inventory file {}", path.display()))?;
+
+        // Dispatch by file extension. YAML and INI route through their
+        // dedicated parsers; everything else (TOML or no extension) goes
+        // to the canonical TOML parser via `parse_inventory_with_dirs`,
+        // which also picks up `group_vars/` and `host_vars/` next to the
+        // inventory file.
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        let inv = match ext.as_deref() {
+            Some("yaml") | Some("yml") => parse_inventory_from_yaml(&src)
+                .with_context(|| format!("parsing YAML inventory file {}", path.display()))?,
+            Some("ini") => parse_inventory_from_ini(&src)
+                .with_context(|| format!("parsing INI inventory file {}", path.display()))?,
+            _ => parse_inventory_with_dirs(&src, inv_dir.as_deref())
+                .with_context(|| format!("parsing inventory file {}", path.display()))?,
+        };
+
         merged = Some(match merged {
             None => inv,
             Some(base) => merge_inventories(base, inv)

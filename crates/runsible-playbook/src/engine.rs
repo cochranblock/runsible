@@ -46,6 +46,12 @@ pub struct RunOptions {
     /// deterministic sequential code path used by all existing tests; `>=2`
     /// dispatches work onto a Tokio runtime bounded by a semaphore.
     pub forks: usize,
+    /// Skip tasks until the named task is encountered (matched by `task.name`).
+    /// All preceding tasks at the top level are reported as Skipped with
+    /// `skipped_reason: "start_at_task"`. Per-host: each host independently
+    /// scans for the start task. M1 limitation: only matches at the top-level
+    /// task sequence — does not descend into block children.
+    pub start_at_task: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -58,6 +64,7 @@ impl Default for RunOptions {
             check_mode: false,
             diff_mode: false,
             forks: 1,
+            start_at_task: None,
         }
     }
 }
@@ -1009,7 +1016,7 @@ fn json_to_toml_value(v: serde_json::Value) -> std::result::Result<toml::Value, 
 }
 
 /// Parse an inventory spec into a flat host list.
-fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
+pub fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
     if spec.contains(',') {
         let hosts: Vec<Host> = spec
             .split(',')
@@ -1048,7 +1055,7 @@ fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
     }])
 }
 
-fn pattern_matches(pattern: &str, host_name: &str) -> bool {
+pub fn pattern_matches(pattern: &str, host_name: &str) -> bool {
     if pattern == "all" || pattern == "*" {
         return true;
     }
@@ -1378,7 +1385,55 @@ fn run_host_tasks(
     let mut notified_for_host: IndexSet<String> = IndexSet::new();
     let connection = LocalSync;
 
+    // start_at_task: once `start_at_task` is set, skip every top-level task
+    // until we encounter one whose `name` matches. M1 only matches at the top
+    // level — block children are not searched. Per-host because each host runs
+    // the same task list independently; `started` is a fresh local here.
+    let mut started: bool = opts.start_at_task.is_none();
+
     for (task_idx, task) in tasks.iter().enumerate() {
+        if !started {
+            let target = opts
+                .start_at_task
+                .as_deref()
+                .expect("started=false implies start_at_task is Some");
+            if task.name.as_deref() == Some(target) {
+                started = true;
+            } else {
+                // Emit a TaskStart + Skipped Outcome with reason
+                // `start_at_task` so events surface the skip clearly.
+                emit(
+                    &mode,
+                    &Event::TaskStart {
+                        play_index: play_idx,
+                        task_index: task_idx,
+                        name: task
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| task.module_name.clone()),
+                        module: task.module_name.clone(),
+                    },
+                );
+                let outcome = runsible_core::types::Outcome {
+                    module: task.module_name.clone(),
+                    host: host.name.clone(),
+                    status: OutcomeStatus::Skipped,
+                    elapsed_ms: 0,
+                    returns: serde_json::json!({"skipped_reason": "start_at_task"}),
+                };
+                stats.skipped += 1;
+                emit(
+                    &mode,
+                    &Event::TaskOutcome {
+                        play_index: play_idx,
+                        task_index: task_idx,
+                        outcome,
+                    },
+                );
+                continue;
+            }
+        }
+
         let _ = execute_one_task(
             task,
             play_idx,

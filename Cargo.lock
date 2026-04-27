@@ -1541,10 +1541,12 @@ dependencies = [
  "runsible-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
  "toml 0.8.23",
  "toml_edit",
+ "yaml2toml",
 ]
 
 [[package]]

@@ -3323,4 +3323,136 @@ assert = { that = ["primary.returns.id == 'p-1'"] }
         assert_eq!(r.ok, 4);
         assert_eq!(r.skipped, 2);
     }
+
+    #[test]
+    fn syntax_check_helpers_dont_run_anything() {
+        // Parse a syntactically-valid playbook; just ensure parse_playbook works.
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "Hello"
+hosts = "localhost"
+[[plays.tasks]]
+name = "say"
+debug = { msg = "hi" }
+"#;
+        parse::parse_playbook(src).expect("parse");
+    }
+
+    #[test]
+    fn syntax_check_catches_bad_module_call() {
+        let src = r#"
+[[plays]]
+name = "bad"
+hosts = "localhost"
+[[plays.tasks]]
+name = "two modules"
+debug = { msg = "x" }
+command = { cmd = "echo y" }
+"#;
+        let pb = parse::parse_playbook(src).expect("playbook parses");
+        let raw = &pb.plays[0].tasks[0];
+        let imports = indexmap::IndexMap::new();
+        assert!(parse::resolve_task(raw, &imports).is_err());
+    }
+
+    #[test]
+    fn start_at_task_skips_preceding_tasks() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "first"
+debug = { msg = "1" }
+[[plays.tasks]]
+name = "second"
+debug = { msg = "2" }
+[[plays.tasks]]
+name = "third"
+debug = { msg = "3" }
+"#;
+        let opts = engine::RunOptions {
+            start_at_task: Some("second".into()),
+            ..Default::default()
+        };
+        let r = engine::run_with(src, "localhost,", "test", opts).unwrap();
+        // first → skipped, second → ok, third → ok
+        assert_eq!(r.skipped, 1);
+        assert_eq!(r.ok, 2);
+        assert_eq!(r.failed, 0);
+    }
+
+    #[test]
+    fn start_at_task_unmatched_skips_all() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "alpha"
+debug = { msg = "a" }
+[[plays.tasks]]
+name = "beta"
+debug = { msg = "b" }
+"#;
+        let opts = engine::RunOptions {
+            start_at_task: Some("does_not_exist".into()),
+            ..Default::default()
+        };
+        let r = engine::run_with(src, "localhost,", "test", opts).unwrap();
+        assert_eq!(r.skipped, 2);
+        assert_eq!(r.ok, 0);
+    }
+
+    #[test]
+    fn start_at_task_default_runs_all() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "localhost"
+[[plays.tasks]]
+name = "a"
+debug = { msg = "x" }
+[[plays.tasks]]
+name = "b"
+debug = { msg = "y" }
+"#;
+        // No start_at_task — both run.
+        let r = run(src, "localhost,", "test").unwrap();
+        assert_eq!(r.ok, 2);
+        assert_eq!(r.skipped, 0);
+    }
+
+    #[test]
+    fn start_at_task_per_host_independent() {
+        let src = r#"
+[imports]
+debug = "runsible_builtin.debug"
+[[plays]]
+name = "p"
+hosts = "all"
+[[plays.tasks]]
+name = "skip"
+debug = { msg = "1" }
+[[plays.tasks]]
+name = "run"
+debug = { msg = "2" }
+"#;
+        let opts = engine::RunOptions {
+            start_at_task: Some("run".into()),
+            ..Default::default()
+        };
+        let r = engine::run_with(src, "h1,h2,h3,", "test", opts).unwrap();
+        // 3 hosts × 1 skipped + 3 hosts × 1 ok = 3 each
+        assert_eq!(r.skipped, 3);
+        assert_eq!(r.ok, 3);
+    }
 }

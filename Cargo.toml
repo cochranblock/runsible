@@ -49,6 +49,7 @@ runsible-vault = { path = "crates/runsible-vault", version = "0.0.1" }
 runsible-galaxy = { path = "crates/runsible-galaxy", version = "0.0.1" }
 runsible-lint = { path = "crates/runsible-lint", version = "0.0.1" }
 runsible-doc = { path = "crates/runsible-doc", version = "0.0.1" }
+yaml2toml = { path = "crates/yaml2toml", version = "0.0.1" }
 semver = "1"
 tar = "0.4"
 flate2 = "1"

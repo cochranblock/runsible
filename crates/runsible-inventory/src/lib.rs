@@ -4,11 +4,13 @@
 //! Ansible-compatible dynamic-inventory emitter.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use indexmap::IndexMap;
 use runsible_core::types::{GroupName, HostName, Vars};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use yaml2toml::{convert as yaml2toml_convert, ConvertError as Yaml2TomlError, Profile};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -44,6 +46,12 @@ pub enum InventoryError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("YAML inventory conversion error: {0}")]
+    YamlConvert(#[from] Yaml2TomlError),
+
+    #[error("INI parse error at line {line}: {message}")]
+    IniParse { line: usize, message: String },
 }
 
 pub type Result<T> = std::result::Result<T, InventoryError>;
@@ -363,6 +371,500 @@ pub fn parse_inventory(src: &str) -> Result<Inventory> {
             if !he.groups.contains(&"all".to_string()) {
                 he.groups.push("all".to_string());
             }
+        }
+    }
+
+    Ok(inv)
+}
+
+// ---------------------------------------------------------------------------
+// YAML inventory parser (routes through yaml2toml per plan §9.2)
+// ---------------------------------------------------------------------------
+
+/// Parse a YAML inventory document by transpiling through `yaml2toml`
+/// (`Profile::Inventory`) and then handing the resulting TOML to
+/// `parse_inventory`.
+///
+/// Per the runsible-inventory plan §9.2, YAML inventories are read-only and
+/// imported through this conversion path. The `warnings` from yaml2toml are
+/// currently discarded; M2 will surface them as engine events.
+pub fn parse_inventory_from_yaml(src: &str) -> Result<Inventory> {
+    let result = yaml2toml_convert(src, Profile::Inventory)?;
+    parse_inventory(&result.toml)
+}
+
+// ---------------------------------------------------------------------------
+// INI inventory parser (read-only per plan §9.1)
+// ---------------------------------------------------------------------------
+
+/// Parse an Ansible-style INI inventory document.
+///
+/// Per the runsible-inventory plan §9.1, INI inventories are read-only and
+/// hand-parsed (no Python-style `literal_eval`). Inline `key=value` host vars
+/// and `[group:vars]` entries are typed as TOML scalars: `port=8080` becomes
+/// an integer, `proto=http` becomes a string, `enabled=true` becomes a bool.
+///
+/// Section forms recognised:
+/// - `[group]`            — host list; each line is a host name plus optional
+///                          inline `key=value` host vars.
+/// - `[group:vars]`       — group var block.
+/// - `[group:children]`   — child group names, one per line.
+///
+/// `#` and `;` start comments. Empty lines are ignored.
+pub fn parse_inventory_from_ini(src: &str) -> Result<Inventory> {
+    // Section kinds we track while scanning the document.
+    enum SectionKind {
+        Hosts(String),     // [group]
+        Vars(String),      // [group:vars]
+        Children(String),  // [group:children]
+    }
+
+    let mut current: Option<SectionKind> = None;
+
+    let mut inv = Inventory::new_empty();
+
+    for (idx, raw_line) in src.lines().enumerate() {
+        let line_no = idx + 1;
+        let line = strip_inline_comment(raw_line).trim();
+
+        if line.is_empty() {
+            continue;
+        }
+
+        // Section header.
+        if let Some(stripped) = line.strip_prefix('[') {
+            let header = stripped
+                .strip_suffix(']')
+                .ok_or_else(|| InventoryError::IniParse {
+                    line: line_no,
+                    message: format!("section header missing ']': '{raw_line}'"),
+                })?
+                .trim();
+
+            if let Some((group, kind)) = header.split_once(':') {
+                let group = group.trim();
+                let kind = kind.trim();
+                match kind {
+                    "vars" => {
+                        ensure_group(&mut inv, group);
+                        current = Some(SectionKind::Vars(group.to_string()));
+                    }
+                    "children" => {
+                        ensure_group(&mut inv, group);
+                        current = Some(SectionKind::Children(group.to_string()));
+                    }
+                    other => {
+                        return Err(InventoryError::IniParse {
+                            line: line_no,
+                            message: format!(
+                                "unknown section qualifier ':{other}' (expected ':vars' or ':children')"
+                            ),
+                        });
+                    }
+                }
+            } else {
+                ensure_group(&mut inv, header);
+                current = Some(SectionKind::Hosts(header.to_string()));
+            }
+            continue;
+        }
+
+        // Body lines depend on the current section kind. With no current
+        // section, treat as ungrouped host list (Ansible compatibility).
+        let section = match &current {
+            Some(s) => s,
+            None => {
+                let host = line.to_string();
+                let expanded = expand_range(&host)?;
+                for h in expanded {
+                    inv.hosts
+                        .entry(h.clone())
+                        .or_insert_with(HostEntry::default);
+                    let g = inv.groups.entry("ungrouped".to_string()).or_default();
+                    if !g.hosts.contains(&h) {
+                        g.hosts.push(h);
+                    }
+                }
+                continue;
+            }
+        };
+
+        match section {
+            SectionKind::Hosts(group_name) => {
+                // "host01 key=val key2=val2"
+                let mut parts = line.split_whitespace();
+                let host_token = match parts.next() {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let inline_vars: std::result::Result<Vars, InventoryError> = parts
+                    .map(|tok| parse_ini_kv(tok, line_no))
+                    .collect();
+                let inline_vars = inline_vars?;
+
+                let expanded = expand_range(host_token)?;
+                for host_name in expanded {
+                    let host_entry = inv
+                        .hosts
+                        .entry(host_name.clone())
+                        .or_insert_with(HostEntry::default);
+                    for (k, v) in &inline_vars {
+                        host_entry.vars.insert(k.clone(), v.clone());
+                    }
+                    let g = inv.groups.entry(group_name.clone()).or_default();
+                    if !g.hosts.contains(&host_name) {
+                        g.hosts.push(host_name);
+                    }
+                }
+            }
+            SectionKind::Vars(group_name) => {
+                let (k, v) = parse_ini_kv(line, line_no)?;
+                let g = inv.groups.entry(group_name.clone()).or_default();
+                g.vars.insert(k, v);
+            }
+            SectionKind::Children(group_name) => {
+                let child = line.split_whitespace().next().unwrap_or("").to_string();
+                if child.is_empty() {
+                    continue;
+                }
+                ensure_group(&mut inv, &child);
+                let g = inv.groups.entry(group_name.clone()).or_default();
+                if !g.children.contains(&child) {
+                    g.children.push(child);
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Post-processing — mirror parse_inventory's bookkeeping.
+    // -----------------------------------------------------------------------
+
+    // Validate child references.
+    let known_groups: std::collections::HashSet<String> = inv.groups.keys().cloned().collect();
+    for (parent, gentry) in &inv.groups {
+        for child in &gentry.children {
+            if !known_groups.contains(child) {
+                return Err(InventoryError::UnknownChild {
+                    child: child.clone(),
+                    parent: parent.clone(),
+                });
+            }
+        }
+    }
+
+    // Direct group memberships.
+    let group_names: Vec<String> = inv.groups.keys().cloned().collect();
+    for g_name in &group_names {
+        let host_list: Vec<String> = inv
+            .groups
+            .get(g_name)
+            .map(|g| g.hosts.clone())
+            .unwrap_or_default();
+        for h in host_list {
+            if let Some(he) = inv.hosts.get_mut(&h) {
+                if !he.groups.contains(g_name) {
+                    he.groups.push(g_name.clone());
+                }
+            }
+        }
+    }
+
+    // Ungrouped hosts.
+    let ungrouped_hosts: Vec<String> = inv
+        .hosts
+        .iter()
+        .filter(|(_, he)| {
+            he.groups
+                .iter()
+                .all(|g| g == "all" || g == "ungrouped")
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for h in &ungrouped_hosts {
+        let ug = inv.groups.entry("ungrouped".to_string()).or_default();
+        if !ug.hosts.contains(h) {
+            ug.hosts.push(h.clone());
+        }
+        if let Some(he) = inv.hosts.get_mut(h) {
+            if !he.groups.contains(&"ungrouped".to_string()) {
+                he.groups.push("ungrouped".to_string());
+            }
+        }
+    }
+
+    // `all` accumulates every host.
+    let all_host_names: Vec<String> = inv.hosts.keys().cloned().collect();
+    {
+        let all_entry = inv.groups.entry("all".to_string()).or_default();
+        for h in &all_host_names {
+            if !all_entry.hosts.contains(h) {
+                all_entry.hosts.push(h.clone());
+            }
+        }
+    }
+    for h in &all_host_names {
+        if let Some(he) = inv.hosts.get_mut(h) {
+            if !he.groups.contains(&"all".to_string()) {
+                he.groups.push("all".to_string());
+            }
+        }
+    }
+
+    Ok(inv)
+}
+
+/// Strip an inline `;` or `#` comment (ignoring chars inside quotes).
+/// Quotes: a `"` toggles quoted state. A leading-of-token `#`/`;` ends parsing.
+fn strip_inline_comment(line: &str) -> &str {
+    let mut in_quotes = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '#' | ';' if !in_quotes => return &line[..i],
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Ensure a group with this name exists in `inv.groups` (no-op if present).
+fn ensure_group(inv: &mut Inventory, name: &str) {
+    inv.groups
+        .entry(name.to_string())
+        .or_insert_with(GroupEntry::default);
+}
+
+/// Parse a single `key=value` token (or `key = value` when split off a vars
+/// line) into a `(String, toml::Value)` pair, typing the value as a TOML
+/// scalar via `infer_ini_scalar`.
+fn parse_ini_kv(input: &str, line_no: usize) -> Result<(String, toml::Value)> {
+    let (key, val) = input
+        .split_once('=')
+        .ok_or_else(|| InventoryError::IniParse {
+            line: line_no,
+            message: format!("expected 'key=value', got '{input}'"),
+        })?;
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err(InventoryError::IniParse {
+            line: line_no,
+            message: format!("empty key in '{input}'"),
+        });
+    }
+    let val = val.trim();
+    Ok((key, infer_ini_scalar(val)))
+}
+
+/// Infer a TOML scalar from an INI value string. Quoted strings are unquoted
+/// verbatim; bare `true`/`false` become bools; integer-shaped tokens become
+/// integers; float-shaped tokens become floats; everything else stays a
+/// string. Per plan §3.1: TOML scalars only — no Python literal_eval.
+fn infer_ini_scalar(raw: &str) -> toml::Value {
+    // Quoted strings: take inner content verbatim.
+    if raw.len() >= 2 {
+        let bytes = raw.as_bytes();
+        if (bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
+        {
+            let inner = &raw[1..raw.len() - 1];
+            return toml::Value::String(inner.to_string());
+        }
+    }
+
+    match raw {
+        "true" => return toml::Value::Boolean(true),
+        "false" => return toml::Value::Boolean(false),
+        _ => {}
+    }
+
+    if let Ok(i) = raw.parse::<i64>() {
+        return toml::Value::Integer(i);
+    }
+    if let Ok(f) = raw.parse::<f64>() {
+        if f.is_finite() {
+            return toml::Value::Float(f);
+        }
+    }
+
+    toml::Value::String(raw.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Vars merge + group_vars/host_vars directory loader
+// ---------------------------------------------------------------------------
+
+/// Merge `from` into `into`. Keys in `from` overwrite keys in `into`.
+///
+/// Used as the explicit, testable building block for layering vars from
+/// `group_vars/<group>.toml` and `host_vars/<host>.toml` on top of inline
+/// inventory vars (Inventory precedence, level 2 of 5 per the
+/// runsible-inventory plan §7.1).
+pub fn merge_vars(into: &mut Vars, from: &Vars) {
+    for (k, v) in from {
+        into.insert(k.clone(), v.clone());
+    }
+}
+
+/// Read a TOML file as a flat `Vars` table. Non-table top-level documents
+/// produce an empty `Vars` (silently skipped — `group_vars`/`host_vars`
+/// files are conventionally key-value tables).
+fn read_vars_file(path: &Path) -> Result<Vars> {
+    let src = std::fs::read_to_string(path)?;
+    let value: toml::Value = src.parse()?;
+    let mut vars: Vars = BTreeMap::new();
+    if let Some(table) = value.as_table() {
+        for (k, v) in table {
+            vars.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(vars)
+}
+
+/// Collect `.toml` files under a directory, sorted lexicographically by
+/// file name. Non-`.toml` entries and subdirectories are skipped.
+fn collect_toml_files_sorted(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut entries: Vec<std::path::PathBuf> = Vec::new();
+    for ent in std::fs::read_dir(dir)? {
+        let ent = ent?;
+        let path = ent.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+            continue;
+        }
+        entries.push(path);
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+/// Load all vars contributions for a single key under `group_vars/` or
+/// `host_vars/`. The convention:
+///
+/// * `<base>/<key>.toml` — flat table, merged in.
+/// * `<base>/<key>/*.toml` — every `.toml` file in lexicographic order,
+///   each merged in (later files override earlier ones).
+///
+/// Both forms may coexist; the `<key>.toml` file is processed first, then
+/// the directory's files. Returns an empty map if neither exists.
+fn load_vars_for_key(base: &Path, key: &str) -> Result<Vars> {
+    let mut acc: Vars = BTreeMap::new();
+    let file_form = base.join(format!("{key}.toml"));
+    if file_form.is_file() {
+        let v = read_vars_file(&file_form)?;
+        merge_vars(&mut acc, &v);
+    }
+    let dir_form = base.join(key);
+    if dir_form.is_dir() {
+        for f in collect_toml_files_sorted(&dir_form)? {
+            let v = read_vars_file(&f)?;
+            merge_vars(&mut acc, &v);
+        }
+    }
+    Ok(acc)
+}
+
+/// Like `parse_inventory`, but also scans `inventory_dir/group_vars/` and
+/// `inventory_dir/host_vars/` for per-group and per-host var files.
+///
+/// Layout:
+/// * `group_vars/<group>.toml` or `group_vars/<group>/*.toml` (lex order,
+///   later wins) → merged into `inventory.groups[<group>].vars`.
+/// * `host_vars/<host>.toml` or `host_vars/<host>/*.toml` → merged into
+///   `inventory.hosts[<host>].vars`.
+///
+/// Per the runsible-inventory plan §7.1:
+/// * Files **win over inline** vars from the inventory document (more
+///   specific source — the file path explicitly names the group/host).
+/// * Host vars **win over group vars** unconditionally during the
+///   per-host merge performed by `merged_vars_for`.
+///
+/// `inventory_dir = None` makes this function equivalent to
+/// `parse_inventory`. A nonexistent `inventory_dir` or missing
+/// `group_vars` / `host_vars` subdirectory is not an error — the
+/// function silently proceeds. Files without a `.toml` extension are
+/// silently skipped.
+pub fn parse_inventory_with_dirs(
+    src: &str,
+    inventory_dir: Option<&Path>,
+) -> Result<Inventory> {
+    let mut inv = parse_inventory(src)?;
+
+    let dir = match inventory_dir {
+        Some(d) => d,
+        None => return Ok(inv),
+    };
+    if !dir.exists() {
+        return Ok(inv);
+    }
+
+    // group_vars/
+    let gv_root = dir.join("group_vars");
+    if gv_root.is_dir() {
+        // Discover all group keys: anything that has a `<key>.toml` file
+        // or a `<key>/` subdirectory in group_vars/. A `group_vars/foo.toml`
+        // file effectively declares `foo` as a group (with no hosts/children
+        // of its own) if it isn't already in the inline inventory.
+        let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for ent in std::fs::read_dir(&gv_root)? {
+            let ent = ent?;
+            let path = ent.path();
+            if path.is_file() {
+                if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        keys.insert(stem.to_string());
+                    }
+                }
+            } else if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    keys.insert(name.to_string());
+                }
+            }
+        }
+
+        for key in keys {
+            let loaded = load_vars_for_key(&gv_root, &key)?;
+            if loaded.is_empty() {
+                continue;
+            }
+            let entry = inv.groups.entry(key.clone()).or_default();
+            // File wins over inline: merge file vars on top.
+            merge_vars(&mut entry.vars, &loaded);
+        }
+    }
+
+    // host_vars/
+    let hv_root = dir.join("host_vars");
+    if hv_root.is_dir() {
+        let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for ent in std::fs::read_dir(&hv_root)? {
+            let ent = ent?;
+            let path = ent.path();
+            if path.is_file() {
+                if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        keys.insert(stem.to_string());
+                    }
+                }
+            } else if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                    keys.insert(name.to_string());
+                }
+            }
+        }
+
+        for key in keys {
+            let loaded = load_vars_for_key(&hv_root, &key)?;
+            if loaded.is_empty() {
+                continue;
+            }
+            // host_vars files declare host vars even when the host wasn't
+            // mentioned in the inline inventory; create-on-demand so the
+            // host shows up in the merged inventory.
+            let entry = inv.hosts.entry(key.clone()).or_default();
+            merge_vars(&mut entry.vars, &loaded);
         }
     }
 
@@ -1180,5 +1682,314 @@ web02 = {}
             }
             other => panic!("expected MergeConflictGroup, got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // group_vars / host_vars directory loader (parse_inventory_with_dirs)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn group_vars_file_overrides_inline() {
+        let dir = tempfile::tempdir().unwrap();
+        let gv = dir.path().join("group_vars");
+        std::fs::create_dir(&gv).unwrap();
+        std::fs::write(gv.join("webservers.toml"), "port = 8080\n").unwrap();
+
+        let src = r#"
+[webservers.vars]
+port = 80
+
+[webservers.hosts]
+web01 = {}
+"#;
+        let inv = parse_inventory_with_dirs(src, Some(dir.path())).unwrap();
+        let webs = inv.groups.get("webservers").expect("webservers present");
+        assert_eq!(
+            webs.vars.get("port").and_then(|v| v.as_integer()),
+            Some(8080),
+            "group_vars/webservers.toml should win over inline [webservers.vars]"
+        );
+    }
+
+    #[test]
+    fn host_vars_file_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let hv = dir.path().join("host_vars");
+        std::fs::create_dir(&hv).unwrap();
+        std::fs::write(hv.join("web01.toml"), "role = \"frontend\"\n").unwrap();
+
+        let src = r#"
+[all.hosts]
+web01 = {}
+"#;
+        let inv = parse_inventory_with_dirs(src, Some(dir.path())).unwrap();
+        let host = inv.hosts.get("web01").expect("web01 present");
+        assert_eq!(
+            host.vars.get("role").and_then(|v| v.as_str()),
+            Some("frontend"),
+            "host_vars/web01.toml should populate host vars"
+        );
+    }
+
+    #[test]
+    fn host_vars_overrides_group_vars() {
+        let dir = tempfile::tempdir().unwrap();
+        let gv = dir.path().join("group_vars");
+        let hv = dir.path().join("host_vars");
+        std::fs::create_dir(&gv).unwrap();
+        std::fs::create_dir(&hv).unwrap();
+        std::fs::write(gv.join("webservers.toml"), "port = 80\n").unwrap();
+        std::fs::write(hv.join("web01.toml"), "port = 8443\n").unwrap();
+
+        let src = r#"
+[webservers.hosts]
+web01 = {}
+"#;
+        let inv = parse_inventory_with_dirs(src, Some(dir.path())).unwrap();
+
+        // Group has 80, host has 8443 — both stored as raw vars.
+        let webs = inv.groups.get("webservers").expect("webservers present");
+        assert_eq!(
+            webs.vars.get("port").and_then(|v| v.as_integer()),
+            Some(80)
+        );
+        let host = inv.hosts.get("web01").expect("web01 present");
+        assert_eq!(
+            host.vars.get("port").and_then(|v| v.as_integer()),
+            Some(8443)
+        );
+
+        // The merged view (what callers actually consume) puts host on top.
+        let merged = inv.merged_vars_for("web01");
+        assert_eq!(
+            merged.get("port").and_then(|v| v.as_integer()),
+            Some(8443),
+            "host vars must win over group vars unconditionally"
+        );
+    }
+
+    #[test]
+    fn group_vars_directory_lexicographic() {
+        let dir = tempfile::tempdir().unwrap();
+        let gv_dir = dir.path().join("group_vars").join("webservers");
+        std::fs::create_dir_all(&gv_dir).unwrap();
+        // Earlier file sets port=80, later file (lex-sorted) overrides to 443.
+        std::fs::write(gv_dir.join("01-base.toml"), "port = 80\n").unwrap();
+        std::fs::write(gv_dir.join("02-prod.toml"), "port = 443\n").unwrap();
+
+        let src = r#"
+[webservers.hosts]
+web01 = {}
+"#;
+        let inv = parse_inventory_with_dirs(src, Some(dir.path())).unwrap();
+        let webs = inv.groups.get("webservers").expect("webservers present");
+        assert_eq!(
+            webs.vars.get("port").and_then(|v| v.as_integer()),
+            Some(443),
+            "later files in group_vars/<group>/ must override earlier ones (lex order)"
+        );
+    }
+
+    #[test]
+    fn nonexistent_inventory_dir_is_noop() {
+        let bogus = std::path::PathBuf::from("/this/path/should/not/exist/runsible-inv-test");
+        let src = r#"
+[webservers.hosts]
+web01 = {}
+"#;
+        // Must not error — missing inventory_dir is silently ignored.
+        let inv = parse_inventory_with_dirs(src, Some(&bogus)).unwrap();
+        assert!(inv.hosts.contains_key("web01"));
+        assert!(inv.groups.contains_key("webservers"));
+    }
+
+    #[test]
+    fn non_toml_files_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let hv = dir.path().join("host_vars");
+        std::fs::create_dir(&hv).unwrap();
+        // README and txt files MUST be ignored — only .toml is read.
+        std::fs::write(hv.join("web01.txt"), "this should be ignored\n").unwrap();
+        std::fs::write(hv.join("README"), "no extension\n").unwrap();
+        std::fs::write(hv.join("web01.toml"), "role = \"frontend\"\n").unwrap();
+
+        let src = r#"
+[all.hosts]
+web01 = {}
+"#;
+        let inv = parse_inventory_with_dirs(src, Some(dir.path())).unwrap();
+        let host = inv.hosts.get("web01").expect("web01 present");
+        // Only the .toml contribution should land in vars.
+        assert_eq!(
+            host.vars.get("role").and_then(|v| v.as_str()),
+            Some("frontend")
+        );
+        assert_eq!(
+            host.vars.len(),
+            1,
+            "non-.toml host_vars files must be silently skipped"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // YAML inventory import (routes through yaml2toml)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn yaml_basic_inventory_parses() {
+        let yaml = "all:\n  children:\n    web:\n      hosts:\n        web01: {}\n";
+        let inv = parse_inventory_from_yaml(yaml).expect("parse yaml");
+        assert!(
+            inv.groups.contains_key("web"),
+            "expected 'web' group, got {:?}",
+            inv.groups.keys().collect::<Vec<_>>()
+        );
+        let web = inv.groups.get("web").unwrap();
+        assert!(
+            web.hosts.iter().any(|h| h == "web01"),
+            "expected web01 in 'web' group, got {:?}",
+            web.hosts
+        );
+        assert!(inv.hosts.contains_key("web01"));
+    }
+
+    #[test]
+    fn yaml_with_inline_vars() {
+        let yaml = r#"
+web:
+  hosts:
+    web01:
+      ansible_host: 10.0.0.5
+"#;
+        let inv = parse_inventory_from_yaml(yaml).expect("parse yaml");
+        let host = inv.hosts.get("web01").expect("web01 present");
+        assert_eq!(
+            host.vars.get("ansible_host").and_then(|v| v.as_str()),
+            Some("10.0.0.5"),
+            "ansible_host not propagated through yaml→toml→inventory"
+        );
+    }
+
+    #[test]
+    fn yaml_invalid_yaml_errors() {
+        // YAML containing unbalanced flow-mapping braces.
+        let bad = "this: { is: not: valid yaml }";
+        assert!(parse_inventory_from_yaml(bad).is_err());
+    }
+
+    #[test]
+    fn yaml_with_group_vars_section() {
+        let yaml = r#"
+webservers:
+  hosts:
+    web01: {}
+  vars:
+    http_port: 80
+"#;
+        let inv = parse_inventory_from_yaml(yaml).expect("parse yaml");
+        let g = inv
+            .groups
+            .get("webservers")
+            .expect("webservers group present");
+        assert_eq!(
+            g.vars.get("http_port").and_then(|v| v.as_integer()),
+            Some(80)
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // INI inventory import (hand-rolled parser, plan §9.1)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ini_basic_groups_and_hosts() {
+        let ini = "[web]\nweb01\nweb02\n";
+        let inv = parse_inventory_from_ini(ini).expect("parse ini");
+        let g = inv.groups.get("web").expect("web group present");
+        assert!(g.hosts.iter().any(|h| h == "web01"), "missing web01");
+        assert!(g.hosts.iter().any(|h| h == "web02"), "missing web02");
+        assert!(inv.hosts.contains_key("web01"));
+        assert!(inv.hosts.contains_key("web02"));
+    }
+
+    #[test]
+    fn ini_inline_host_vars() {
+        let ini = "[web]\nweb01 port=8080 proto=http\n";
+        let inv = parse_inventory_from_ini(ini).expect("parse ini");
+        let host = inv.hosts.get("web01").expect("web01 present");
+
+        // `port=8080` is bare-numeric — typed as TOML integer (locked-in choice).
+        assert_eq!(
+            host.vars.get("port").and_then(|v| v.as_integer()),
+            Some(8080),
+            "expected port to type as integer; got {:?}",
+            host.vars.get("port")
+        );
+
+        // `proto=http` is a non-numeric bare token — typed as TOML string.
+        assert_eq!(
+            host.vars.get("proto").and_then(|v| v.as_str()),
+            Some("http")
+        );
+    }
+
+    #[test]
+    fn ini_group_vars_section() {
+        let ini = "[web]\nweb01\n\n[web:vars]\nport=80\nname=hello\n";
+        let inv = parse_inventory_from_ini(ini).expect("parse ini");
+        let g = inv.groups.get("web").expect("web group present");
+        assert_eq!(
+            g.vars.get("port").and_then(|v| v.as_integer()),
+            Some(80),
+            "expected port=80 typed as integer; got {:?}",
+            g.vars.get("port")
+        );
+        assert_eq!(
+            g.vars.get("name").and_then(|v| v.as_str()),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn ini_group_children_section() {
+        let ini = "[web]\nweb01\n\n[db]\ndb01\n\n[prod:children]\nweb\ndb\n";
+        let inv = parse_inventory_from_ini(ini).expect("parse ini");
+        let prod = inv.groups.get("prod").expect("prod group present");
+        assert_eq!(prod.children, vec!["web".to_string(), "db".to_string()]);
+    }
+
+    #[test]
+    fn ini_comments_skipped() {
+        let ini = r#"
+# this is a comment
+; this also a comment
+[web]
+# inline comment
+web01
+; another comment
+web02
+"#;
+        let inv = parse_inventory_from_ini(ini).expect("parse ini");
+        let g = inv.groups.get("web").expect("web group present");
+        assert!(g.hosts.iter().any(|h| h == "web01"));
+        assert!(g.hosts.iter().any(|h| h == "web02"));
+        // No spurious hosts created from the comment lines.
+        assert_eq!(g.hosts.len(), 2, "got hosts: {:?}", g.hosts);
+    }
+
+    #[test]
+    fn ini_empty_string_yields_empty_inventory() {
+        let inv = parse_inventory_from_ini("").expect("parse empty ini");
+        assert_eq!(inv.hosts.len(), 0);
+        // `all` and `ungrouped` are always present.
+        assert!(inv.groups.contains_key("all"));
+        assert!(inv.groups.contains_key("ungrouped"));
+        // No other groups beyond those two implicit ones.
+        let extra: Vec<&String> = inv
+            .groups
+            .keys()
+            .filter(|k| k.as_str() != "all" && k.as_str() != "ungrouped")
+            .collect();
+        assert!(extra.is_empty(), "unexpected extra groups: {extra:?}");
     }
 }
