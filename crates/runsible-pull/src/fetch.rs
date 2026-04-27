@@ -231,6 +231,8 @@ mod tests {
                 state_dir: state.path().to_path_buf(),
                 heartbeat_path: state.path().join("heartbeat.json"),
             },
+            schedule: Default::default(),
+            heartbeat: Default::default(),
         };
 
         // First call: clone.

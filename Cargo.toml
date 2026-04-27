@@ -61,3 +61,7 @@ dirs = "5"
 tempfile = "3"
 minijinja = "2"
 exopack = { path = "/home/mcochran/exopack", default-features = false, features = ["triple_sims"] }
+pbkdf2 = "0.12"
+aes = "0.8"
+ctr = "0.9"
+hmac = "0.12"

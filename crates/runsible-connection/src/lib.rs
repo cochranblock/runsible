@@ -7,6 +7,7 @@ pub mod errors;
 pub mod local;
 pub mod local_sync;
 pub mod spec;
+pub mod ssh_cert;
 pub mod ssh_system;
 
 pub use errors::{ConnectionError, Result};
@@ -143,6 +144,9 @@ mod tests {
             identity_file: None,
             control_path: None,
             connect_timeout_seconds: None,
+            ca_key_path: None,
+            ca_principal: None,
+            ca_validity_seconds: None,
         };
 
         let conn = spec.build();

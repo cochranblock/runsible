@@ -178,6 +178,8 @@ mod tests {
                 state_dir: PathBuf::from("/tmp"),
                 heartbeat_path: PathBuf::from("/tmp/heartbeat.json"),
             },
+            schedule: Default::default(),
+            heartbeat: Default::default(),
         };
 
         let err = run_playbook(&cfg, std::path::Path::new("/tmp"))

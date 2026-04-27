@@ -13,12 +13,83 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::{PullError, Result};
 
-/// Top-level `pull.toml` schema (M0 subset).
+/// Top-level `pull.toml` schema.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullConfig {
     pub source: SourceConfig,
     pub apply: ApplyConfig,
     pub paths: PathsConfig,
+    /// Optional `[schedule]` section — used by `runsible-pull --daemon`.
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
+    /// Optional `[heartbeat]` section — HTTP POST after each cycle.
+    #[serde(default)]
+    pub heartbeat: HeartbeatConfig,
+}
+
+/// `[heartbeat]` — POST the heartbeat JSON to a control plane after each cycle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct HeartbeatConfig {
+    /// HTTP(S) URL. Empty disables HTTP heartbeating.
+    pub url: String,
+    /// Bearer token sent as `Authorization: Bearer <token>`.
+    pub bearer_token: String,
+    /// Per-attempt timeout in seconds.
+    #[serde(default = "default_hb_timeout_seconds")]
+    pub timeout_seconds: u64,
+    /// Max retries with exponential backoff.
+    #[serde(default = "default_hb_retries")]
+    pub max_retries: u32,
+    /// Initial backoff seconds (doubles per retry).
+    #[serde(default = "default_hb_backoff")]
+    pub initial_backoff_seconds: u64,
+    /// Path to the failed-POST queue (NDJSON). Empty disables queueing.
+    pub queue_path: String,
+}
+
+fn default_hb_timeout_seconds() -> u64 { 10 }
+fn default_hb_retries() -> u32 { 3 }
+fn default_hb_backoff() -> u64 { 5 }
+
+/// `[schedule]` — daemon-mode pacing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ScheduleConfig {
+    /// Interval between cycles. Forms: "10m", "30s", "2h", "1d".
+    pub interval: String,
+    /// Random jitter added to each interval (same syntax). 0 = none.
+    pub jitter: String,
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self { interval: "10m".to_string(), jitter: "30s".to_string() }
+    }
+}
+
+/// Parse a duration of the form `<n>(s|m|h|d)`. Returns seconds.
+pub fn parse_duration(s: &str) -> std::result::Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(0);
+    }
+    let (num_part, suffix) = s
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| (&s[..i], &s[i..]))
+        .unwrap_or((s, ""));
+    let n: u64 = num_part
+        .parse()
+        .map_err(|e| format!("parse_duration: bad number in {s:?}: {e}"))?;
+    let mult: u64 = match suffix.trim() {
+        "" | "s" => 1,
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 60 * 60 * 24,
+        other => return Err(format!("parse_duration: unknown suffix {other:?} in {s:?}")),
+    };
+    Ok(n * mult)
 }
 
 /// `[source]` table — where to fetch the bundle from.

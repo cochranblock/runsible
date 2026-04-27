@@ -7,9 +7,11 @@
 
 pub mod apply;
 pub mod config;
+pub mod daemon;
 pub mod errors;
 pub mod fetch;
 pub mod heartbeat;
+pub mod http_heartbeat;
 
 pub use apply::{run_playbook, ApplyResult};
 pub use config::{ApplyConfig, PathsConfig, PullConfig, SourceConfig};
@@ -199,6 +201,8 @@ mod tests {
                 state_dir: state.to_path_buf(),
                 heartbeat_path: state.join("heartbeat.json"),
             },
+            schedule: Default::default(),
+            heartbeat: Default::default(),
         }
     }
 

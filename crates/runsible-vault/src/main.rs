@@ -70,26 +70,68 @@ enum Command {
         #[arg(long = "recipient", short = 'r')]
         recipients: Vec<String>,
     },
+
+    /// Import a legacy `$ANSIBLE_VAULT;1.1`/`;1.2` file: decrypt with a
+    /// password, then re-encrypt under runsible recipients (writes
+    /// <file>.vault and leaves the original alone).
+    ImportAnsible {
+        /// Path to the legacy ansible-vault file.
+        file: PathBuf,
+        /// Read the legacy password from this file (newline-trimmed).
+        /// Mutually exclusive with `--password`.
+        #[arg(long = "password-file")]
+        password_file: Option<PathBuf>,
+        /// Pass the legacy password literally on the command line. NOT
+        /// recommended (visible in shell history); use --password-file.
+        #[arg(long)]
+        password: Option<String>,
+        /// Recipient public key(s) for the re-encrypted output. Repeatable.
+        #[arg(long = "recipient", short = 'r')]
+        recipients: Vec<String>,
+        /// Write to this path instead of <file>.vault.
+        #[arg(long = "out", short = 'o')]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
 enum RecipientsCmd {
-    /// List recipients recorded in the vault file header.
+    /// List recipients recorded in the vault file header (algorithm + short
+    /// header-share, NOT the original public keys — age doesn't expose those).
     List {
         /// Path to the vault file.
         file: PathBuf,
     },
-    /// (M1) Add a recipient to an existing vault file.
+    /// Add a recipient to an existing vault file. Re-encrypts the body under
+    /// `existing` ∪ `recipient`. Caller must list ALL existing recipients via
+    /// repeated `--existing` flags so previously-authorized parties stay
+    /// authorized; recipients not listed will be silently dropped.
     Add {
         file: PathBuf,
+        /// New recipient public key to authorize.
         #[arg(long)]
         recipient: String,
+        /// Current recipient set (repeatable). Required so previously-
+        /// authorized parties stay authorized after rekey.
+        #[arg(long = "existing")]
+        existing: Vec<String>,
     },
-    /// (M1) Remove a recipient from an existing vault file.
+    /// Remove a recipient. Re-encrypts the body under `existing` minus
+    /// `recipient`. Same explicit-existing-set requirement as `add`.
     Remove {
         file: PathBuf,
         #[arg(long)]
         recipient: String,
+        #[arg(long = "existing")]
+        existing: Vec<String>,
+    },
+    /// Re-key the file to a fully specified new recipient set. Use this when
+    /// you want to set the recipient list explicitly (replacing whatever was
+    /// there).
+    Rekey {
+        file: PathBuf,
+        #[arg(long = "recipient", short = 'r')]
+        recipients: Vec<String>,
     },
 }
 
@@ -113,14 +155,22 @@ fn run() -> anyhow::Result<()> {
         Command::Decrypt { file } => cmd_decrypt(&file),
         Command::Recipients { cmd } => match cmd {
             RecipientsCmd::List { file } => cmd_recipients_list(&file),
-            RecipientsCmd::Add { .. } => {
-                anyhow::bail!("recipients add: not yet implemented (M1)")
+            RecipientsCmd::Add { file, recipient, existing } => {
+                cmd_recipients_add(&file, &recipient, &existing)
             }
-            RecipientsCmd::Remove { .. } => {
-                anyhow::bail!("recipients remove: not yet implemented (M1)")
+            RecipientsCmd::Remove { file, recipient, existing } => {
+                cmd_recipients_remove(&file, &recipient, &existing)
             }
+            RecipientsCmd::Rekey { file, recipients } => cmd_recipients_rekey(&file, &recipients),
         },
         Command::EncryptString { value, recipients } => cmd_encrypt_string(value, &recipients),
+        Command::ImportAnsible {
+            file,
+            password_file,
+            password,
+            recipients,
+            out,
+        } => cmd_import_ansible(&file, password_file.as_deref(), password.as_deref(), &recipients, out.as_deref()),
     }
 }
 
@@ -219,7 +269,130 @@ fn cmd_recipients_list(file: &Path) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("vault parse error: {e}"))?;
 
     println!("recipient count in header: {}", envelope.recipient_count);
-    println!("(full recipient public-key listing requires re-encryption metadata — M1)");
+    let listed = runsible_vault::recipients::list_recipients(&raw)
+        .map_err(|e| anyhow::anyhow!("listing recipients: {e}"))?;
+    for entry in &listed {
+        println!("  {entry}");
+    }
+    Ok(())
+}
+
+/// `recipients add <file.vault> --recipient <new> --existing <e1> --existing <e2> ...`
+fn cmd_recipients_add(file: &Path, new_recipient: &str, existing: &[String]) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {}", file.display()))?;
+    let keys_path = default_keys_path();
+    let store = KeyStore::load_or_default(&keys_path).context("loading key store")?;
+
+    if existing.is_empty() {
+        anyhow::bail!(
+            "recipients add: --existing list is empty. \
+             You must list ALL current recipient pubkeys via repeated --existing flags \
+             so previously-authorized parties stay authorized after rekey."
+        );
+    }
+
+    let new_envelope = runsible_vault::recipients::add_recipient(&raw, new_recipient, existing, &store)
+        .map_err(|e| anyhow::anyhow!("recipients add: {e}"))?;
+
+    std::fs::write(file, new_envelope.as_bytes())
+        .with_context(|| format!("writing {}", file.display()))?;
+    println!("added recipient → {}", file.display());
+    Ok(())
+}
+
+/// `recipients remove <file.vault> --recipient <drop> --existing <e1> ...`
+fn cmd_recipients_remove(file: &Path, drop_recipient: &str, existing: &[String]) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {}", file.display()))?;
+    let keys_path = default_keys_path();
+    let store = KeyStore::load_or_default(&keys_path).context("loading key store")?;
+
+    if existing.is_empty() {
+        anyhow::bail!(
+            "recipients remove: --existing list is empty. \
+             You must list ALL current recipient pubkeys via repeated --existing flags."
+        );
+    }
+
+    let new_envelope = runsible_vault::recipients::remove_recipient(&raw, drop_recipient, existing, &store)
+        .map_err(|e| anyhow::anyhow!("recipients remove: {e}"))?;
+
+    std::fs::write(file, new_envelope.as_bytes())
+        .with_context(|| format!("writing {}", file.display()))?;
+    println!("removed recipient → {}", file.display());
+    Ok(())
+}
+
+/// `recipients rekey <file.vault> --recipient <pubkey>...`
+fn cmd_recipients_rekey(file: &Path, new_recipients: &[String]) -> anyhow::Result<()> {
+    let raw = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {}", file.display()))?;
+    let keys_path = default_keys_path();
+    let store = KeyStore::load_or_default(&keys_path).context("loading key store")?;
+
+    if new_recipients.is_empty() {
+        anyhow::bail!(
+            "recipients rekey: at least one --recipient is required (refusing to write a vault file with zero recipients)"
+        );
+    }
+
+    let new_envelope = runsible_vault::recipients::rekey_to(&raw, new_recipients, &store)
+        .map_err(|e| anyhow::anyhow!("recipients rekey: {e}"))?;
+
+    std::fs::write(file, new_envelope.as_bytes())
+        .with_context(|| format!("writing {}", file.display()))?;
+    println!("rekeyed → {}", file.display());
+    Ok(())
+}
+
+/// `import-ansible <file> [--password-file PATH | --password STR] [-r ...] [-o OUT]`
+fn cmd_import_ansible(
+    file: &Path,
+    password_file: Option<&Path>,
+    password: Option<&str>,
+    cli_recipients: &[String],
+    out: Option<&Path>,
+) -> anyhow::Result<()> {
+    let body = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {}", file.display()))?;
+
+    // Resolve password: --password-file > --password > stdin.
+    let pw = if let Some(p) = password_file {
+        std::fs::read_to_string(p)
+            .with_context(|| format!("reading password file {}", p.display()))?
+            .trim_end_matches(['\n', '\r'])
+            .to_owned()
+    } else if let Some(p) = password {
+        p.to_owned()
+    } else {
+        let mut buf = String::new();
+        io::stdin()
+            .read_to_string(&mut buf)
+            .context("reading password from stdin")?;
+        buf.trim_end_matches(['\n', '\r']).to_owned()
+    };
+    if pw.is_empty() {
+        anyhow::bail!("ansible-vault import: empty password (use --password-file or --password)");
+    }
+
+    let plaintext = runsible_vault::ansible_import::import_ansible_vault(&body, &pw)
+        .map_err(|e| anyhow::anyhow!("import-ansible: {e}"))?;
+
+    let recipients = resolve_recipients(cli_recipients)?;
+    let recipient_count = recipients.len() as u32;
+    let ciphertext = encrypt_bytes_to_keys(&plaintext, &recipients)
+        .context("re-encrypting under runsible recipients")?;
+    let envelope = emit_envelope(&ciphertext, recipient_count);
+
+    let out_path = out.map(PathBuf::from).unwrap_or_else(|| {
+        let mut p = file.as_os_str().to_owned();
+        p.push(".vault");
+        PathBuf::from(p)
+    });
+    std::fs::write(&out_path, envelope.as_bytes())
+        .with_context(|| format!("writing {}", out_path.display()))?;
+    println!("imported → {}", out_path.display());
     Ok(())
 }
 

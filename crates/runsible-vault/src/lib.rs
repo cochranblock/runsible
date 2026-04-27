@@ -2,10 +2,12 @@
 // Contributors: Cochran Block
 //! runsible-vault — age-based file encryption for the runsible ecosystem.
 
+pub mod ansible_import;
 pub mod crypto;
 pub mod envelope;
 pub mod errors;
 pub mod keys;
+pub mod recipients;
 
 pub use errors::{Result, VaultError};
 

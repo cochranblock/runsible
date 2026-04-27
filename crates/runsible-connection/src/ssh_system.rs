@@ -18,6 +18,10 @@ pub struct SshSystemConnection {
     pub control_path: Option<String>,
     pub connect_timeout: Duration,
     pub extra_args: Vec<String>,
+    /// Optional CA config — when set, every exec/scp call mints a fresh
+    /// short-lived user certificate via `ssh-keygen -s` before connecting.
+    /// Requires `identity_file` to be set (the user key whose `.pub` gets signed).
+    pub ca_config: Option<crate::ssh_cert::CaConfig>,
 }
 
 /// Single-quote–escape a string for inclusion in a remote shell command.
@@ -58,6 +62,27 @@ impl SshSystemConnection {
             opts.push(a.clone());
         }
         opts
+    }
+
+    /// If a CA config is set, mint a fresh JIT cert for the configured user
+    /// pubkey. Returns Ok(()) on success or if no CA config is set. Errors
+    /// only on a real signing failure (so existing tests without ca_config
+    /// keep working).
+    fn mint_jit_cert_if_configured(&self) -> Result<(), ConnectionError> {
+        let Some(ca) = &self.ca_config else {
+            return Ok(());
+        };
+        let Some(id) = &self.identity_file else {
+            return Err(ConnectionError::Ssh(
+                "ssh ca: ca_config requires identity_file (user key whose .pub gets signed)".into(),
+            ));
+        };
+        // identity_file is the private key path; its public counterpart is `<id>.pub`.
+        let pubkey = PathBuf::from(format!("{}.pub", id.display()));
+        let _cert = crate::ssh_cert::mint_jit_cert(&pubkey, ca)?;
+        // OpenSSH automatically presents `<id>-cert.pub` alongside `<id>` when
+        // -i <id> is passed; we don't need to add an explicit flag.
+        Ok(())
     }
 
     /// Return `[user@]host` string.
@@ -184,6 +209,10 @@ fn remote_become_prefix(spec: &BecomeSpec) -> (Vec<String>, bool) {
 #[async_trait]
 impl Connection for SshSystemConnection {
     async fn exec(&self, cmd: &Cmd) -> CoreResult<ExecOutcome> {
+        // JIT cert: mint fresh before we open the SSH connection.
+        self.mint_jit_cert_if_configured()
+            .map_err(Into::<runsible_core::errors::Error>::into)?;
+
         let (sudo_prefix, stdin_pw) = if let Some(spec) = &cmd.become_ {
             remote_become_prefix(spec)
         } else {
@@ -233,6 +262,9 @@ impl Connection for SshSystemConnection {
     async fn put_file(&self, src: &Path, dst: &Path, mode: Option<u32>) -> CoreResult<()> {
         use tokio::process::Command;
 
+        self.mint_jit_cert_if_configured()
+            .map_err(Into::<runsible_core::errors::Error>::into)?;
+
         let mut scp_args: Vec<String> = Vec::new();
         if let Some(p) = self.port {
             scp_args.push("-P".into());
@@ -281,6 +313,9 @@ impl Connection for SshSystemConnection {
 
     async fn get_file(&self, src: &Path, dst: &Path) -> CoreResult<()> {
         use tokio::process::Command;
+
+        self.mint_jit_cert_if_configured()
+            .map_err(Into::<runsible_core::errors::Error>::into)?;
 
         let mut scp_args: Vec<String> = Vec::new();
         if let Some(p) = self.port {
@@ -375,6 +410,7 @@ mod tests {
             control_path: Some("/tmp/cp.sock".into()),
             connect_timeout: Duration::from_secs(7),
             extra_args: vec!["-vvv".into()],
+            ca_config: None,
         };
         assert_eq!(conn.host, "host.example.com");
         assert_eq!(conn.user.as_deref(), Some("u"));
@@ -396,6 +432,7 @@ mod tests {
             control_path: None,
             connect_timeout: Duration::from_secs(10),
             extra_args: vec![],
+            ca_config: None,
         };
         assert_eq!(with_user.target(), "alice@h");
 
@@ -407,6 +444,7 @@ mod tests {
             control_path: None,
             connect_timeout: Duration::from_secs(10),
             extra_args: vec![],
+            ca_config: None,
         };
         assert_eq!(no_user.target(), "h2");
     }
@@ -423,6 +461,7 @@ mod tests {
             control_path: Some("/tmp/cp".into()),
             connect_timeout: Duration::from_secs(5),
             extra_args: vec!["-Cv".into()],
+            ca_config: None,
         };
         let opts = conn.ssh_options();
         assert!(opts.contains(&"BatchMode=yes".to_string()));
@@ -488,6 +527,9 @@ mod tests {
             identity_file: None,
             control_path: None,
             connect_timeout_seconds: Some(1),
+            ca_key_path: None,
+            ca_principal: None,
+            ca_validity_seconds: None,
         };
         let conn: Box<dyn Connection> = spec.build();
         // If this were SSH, it would fail trying to reach `ignored.example.invalid`.
@@ -511,6 +553,9 @@ mod tests {
             identity_file: None,
             control_path: None,
             connect_timeout_seconds: None,
+            ca_key_path: None,
+            ca_principal: None,
+            ca_validity_seconds: None,
         };
         // build() should produce a Connection without panicking.
         let _conn = spec.build();
@@ -526,6 +571,7 @@ mod tests {
             control_path: spec.control_path.clone(),
             connect_timeout: Duration::from_secs(spec.connect_timeout_seconds.unwrap_or(10)),
             extra_args: vec![],
+            ca_config: None,
         };
         assert_eq!(direct.host, "localhost");
         assert_eq!(direct.connect_timeout, Duration::from_secs(10));
