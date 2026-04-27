@@ -59,3 +59,4 @@ colored = "2"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 tempfile = "3"
+minijinja = "2"

@@ -25,3 +25,4 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 indexmap = { workspace = true }
+minijinja = { workspace = true }

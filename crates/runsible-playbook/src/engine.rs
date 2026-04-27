@@ -1,37 +1,52 @@
-//! M0 engine: single-task happy-path runner.
+//! M1 engine: variables, templating, when/register/tags/handlers.
 //!
-//! Execution model:
-//!   parse playbook → resolve inventory → for each play / host / task:
-//!     emit TaskStart → plan() → emit PlanComputed → apply() → emit TaskOutcome
-//!   emit RunSummary
-//!
-//! At M0 apply() is always called regardless of plan.is_empty() so that
-//! informational modules (debug) always fire.
+//! Execution per host:
+//!   merge vars (host + play) → for each task:
+//!     filter by tags → eval `when` (skip if false) → render args via templater
+//!     → plan() → emit PlanComputed → apply() → register outcome → notify handlers
+//!     → emit TaskOutcome
+//!   end-of-play: flush notified handlers (fire each handler's task)
 
 use std::time::Instant;
 
+use indexmap::{IndexMap, IndexSet};
 use runsible_core::{
     event::Event,
-    types::{Host, Vars},
+    types::{Host, OutcomeStatus, Vars},
 };
 
 use crate::{
+    ast::Task,
     catalog::ModuleCatalog,
     errors::{PlaybookError, Result},
     output::{emit, OutputMode},
-    parse::{parse_playbook, resolve_task},
+    parse::{parse_playbook, resolve_handler, resolve_task},
+    templating::Templater,
 };
 
+/// CLI-supplied filters / extras.
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    pub tags: Vec<String>,
+    pub skip_tags: Vec<String>,
+    pub extra_vars: Vars,
+}
+
 /// Parse and run a playbook file against the given inventory string.
-///
-/// `inventory_spec` mirrors the Ansible `-i` flag:
-///   - `"localhost,"` or `"host1,host2,"` — inline comma-separated host list
-///   - a file path that exists on disk — loaded via runsible-inventory
-///   - a bare host name without comma — treated as a single inline host
 pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Result<RunResult> {
+    run_with(playbook_src, inventory_spec, playbook_label, RunOptions::default())
+}
+
+pub fn run_with(
+    playbook_src: &str,
+    inventory_spec: &str,
+    playbook_label: &str,
+    opts: RunOptions,
+) -> Result<RunResult> {
     let start = Instant::now();
     let mode = OutputMode::detect();
     let catalog = ModuleCatalog::with_builtins();
+    let templater = Templater::new();
 
     let hosts = resolve_inventory(inventory_spec)?;
 
@@ -52,7 +67,6 @@ pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Re
     for (play_idx, raw_play) in pb.plays.iter().enumerate() {
         let pattern_str = raw_play.hosts.to_pattern();
 
-        // Resolve the host pattern against our inline host list.
         let play_hosts: Vec<&Host> = hosts
             .iter()
             .filter(|h| pattern_matches(&pattern_str, &h.name))
@@ -75,29 +89,118 @@ pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Re
             .chain(raw_play.post_tasks.iter())
             .collect();
 
+        // Resolve all tasks once (parse-time validation).
+        let tasks: Vec<Task> = task_sequence
+            .iter()
+            .map(|raw| resolve_task(raw, &pb.imports))
+            .collect::<Result<_>>()?;
+
+        // Resolve all handlers once.
+        let handlers: IndexMap<String, Task> = raw_play
+            .handlers
+            .iter()
+            .map(|(id, raw)| resolve_handler(id, raw, &pb.imports).map(|t| (id.clone(), t)))
+            .collect::<Result<_>>()?;
+
+        // Validate: every notify ID must be a real handler.
+        for t in &tasks {
+            for h_id in &t.notify {
+                if !handlers.contains_key(h_id) {
+                    return Err(PlaybookError::TypeCheck(format!(
+                        "task {:?}: notify references unknown handler '{}'",
+                        t.name, h_id
+                    )));
+                }
+            }
+        }
+
         let mut play_stats = RunStats::default();
+        let mut play_changed_handlers: IndexMap<String, IndexSet<String>> = IndexMap::new();
 
-        for (task_idx, raw_task) in task_sequence.iter().enumerate() {
-            let task = resolve_task(raw_task, &pb.imports)?;
-
-            let module = catalog
-                .get(&task.module_name)
-                .ok_or_else(|| PlaybookError::ModuleNotFound(task.module_name.clone()))?;
-
-            emit(
-                &mode,
-                &Event::TaskStart {
-                    play_index: play_idx,
-                    task_index: task_idx,
-                    name: task.name.clone().unwrap_or_else(|| task.module_name.clone()),
-                    module: task.module_name.clone(),
-                },
+        for host in &play_hosts {
+            // Per-host vars: host inline vars (lvl 2) → play vars (lvl 3) → extra_vars (lvl 4).
+            let mut vars: Vars = host.vars.clone();
+            for (k, v) in &raw_play.vars {
+                vars.insert(k.clone(), v.clone());
+            }
+            for (k, v) in &opts.extra_vars {
+                vars.insert(k.clone(), v.clone());
+            }
+            // Magic vars
+            vars.insert(
+                "inventory_hostname".into(),
+                toml::Value::String(host.name.clone()),
             );
 
-            for host in &play_hosts {
-                let plan = module
-                    .plan(&task.args, host)
-                    .map_err(|e| PlaybookError::ExecFailed {
+            let mut notified_for_host: IndexSet<String> = IndexSet::new();
+
+            for (task_idx, task) in tasks.iter().enumerate() {
+                // Tag filtering.
+                let effective_tags: Vec<&String> =
+                    task.tags.iter().chain(raw_play.tags.iter()).collect();
+                if !tag_filter_passes(&effective_tags, &opts.tags, &opts.skip_tags) {
+                    continue;
+                }
+
+                emit(
+                    &mode,
+                    &Event::TaskStart {
+                        play_index: play_idx,
+                        task_index: task_idx,
+                        name: task
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| task.module_name.clone()),
+                        module: task.module_name.clone(),
+                    },
+                );
+
+                // when evaluation.
+                if let Some(expr) = &task.when {
+                    match templater.eval_bool(expr, &vars) {
+                        Ok(false) => {
+                            let outcome = runsible_core::types::Outcome {
+                                module: task.module_name.clone(),
+                                host: host.name.clone(),
+                                status: OutcomeStatus::Skipped,
+                                elapsed_ms: 0,
+                                returns: serde_json::json!({"skipped_reason": "when=false"}),
+                            };
+                            play_stats.skipped += 1;
+                            emit(
+                                &mode,
+                                &Event::TaskOutcome {
+                                    play_index: play_idx,
+                                    task_index: task_idx,
+                                    outcome,
+                                },
+                            );
+                            continue;
+                        }
+                        Ok(true) => {}
+                        Err(e) => {
+                            return Err(PlaybookError::ExecFailed {
+                                host: host.name.clone(),
+                                message: format!("when expression error: {e}"),
+                            });
+                        }
+                    }
+                }
+
+                // Template the args.
+                let rendered_args = templater.render_value(&task.args, &vars).map_err(|e| {
+                    PlaybookError::ExecFailed {
+                        host: host.name.clone(),
+                        message: format!("template error: {e}"),
+                    }
+                })?;
+
+                let module = catalog
+                    .get(&task.module_name)
+                    .ok_or_else(|| PlaybookError::ModuleNotFound(task.module_name.clone()))?;
+
+                let plan =
+                    module.plan(&rendered_args, host).map_err(|e| PlaybookError::ExecFailed {
                         host: host.name.clone(),
                         message: e.to_string(),
                     })?;
@@ -111,19 +214,77 @@ pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Re
                     },
                 );
 
-                let outcome = module
-                    .apply(&plan, host)
-                    .map_err(|e| PlaybookError::ExecFailed {
+                let mut outcome =
+                    module.apply(&plan, host).map_err(|e| PlaybookError::ExecFailed {
                         host: host.name.clone(),
                         message: e.to_string(),
                     })?;
 
-                use runsible_core::types::OutcomeStatus::*;
+                // Special handling for set_fact: merge plan.diff into vars.
+                if task.module_name == "runsible_builtin.set_fact" {
+                    if let Some(obj) = plan.diff.as_object() {
+                        for (k, v) in obj {
+                            if let Ok(tv) = json_to_toml_value(v.clone()) {
+                                vars.insert(k.clone(), tv);
+                            }
+                        }
+                    }
+                }
+
+                // Special handling for assert: evaluate `that` expressions.
+                if task.module_name == "runsible_builtin.assert" {
+                    let that = plan
+                        .diff
+                        .get("that")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut failed_expr: Option<String> = None;
+                    for expr in &that {
+                        if let Some(s) = expr.as_str() {
+                            match templater.eval_bool(s, &vars) {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    failed_expr = Some(s.to_string());
+                                    break;
+                                }
+                                Err(e) => {
+                                    failed_expr = Some(format!("{s} ({e})"));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(e) = failed_expr {
+                        outcome.status = OutcomeStatus::Failed;
+                        outcome.returns = serde_json::json!({
+                            "msg": "assertion failed",
+                            "evaluated_to": false,
+                            "assertion": e,
+                        });
+                    }
+                }
+
+                // register: store outcome under the named key in vars.
+                if let Some(reg_key) = &task.register {
+                    let outcome_json = serde_json::to_value(&outcome).unwrap_or_default();
+                    if let Ok(tv) = json_to_toml_value(outcome_json) {
+                        vars.insert(reg_key.clone(), tv);
+                    }
+                }
+
                 match outcome.status {
-                    Ok => play_stats.ok += 1,
-                    Changed => play_stats.changed += 1,
-                    Skipped => play_stats.skipped += 1,
-                    Failed | Unreachable => play_stats.failed += 1,
+                    OutcomeStatus::Ok => play_stats.ok += 1,
+                    OutcomeStatus::Changed => play_stats.changed += 1,
+                    OutcomeStatus::Skipped => play_stats.skipped += 1,
+                    OutcomeStatus::Failed | OutcomeStatus::Unreachable => play_stats.failed += 1,
+                }
+
+                // notify: only on Changed.
+                if matches!(outcome.status, OutcomeStatus::Changed) {
+                    for h_id in &task.notify {
+                        notified_for_host.insert(h_id.clone());
+                    }
                 }
 
                 emit(
@@ -131,6 +292,59 @@ pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Re
                     &Event::TaskOutcome {
                         play_index: play_idx,
                         task_index: task_idx,
+                        outcome,
+                    },
+                );
+            }
+
+            // Aggregate notifications across hosts.
+            for h_id in notified_for_host {
+                play_changed_handlers
+                    .entry(h_id)
+                    .or_default()
+                    .insert(host.name.clone());
+            }
+        }
+
+        // Flush handlers — one execution per (handler, host) pair.
+        for (h_id, host_set) in &play_changed_handlers {
+            let handler_task = handlers.get(h_id).expect("validated above");
+            emit(
+                &mode,
+                &Event::HandlerFlush {
+                    play_index: play_idx,
+                    handler_id: h_id.clone(),
+                },
+            );
+            let module = catalog
+                .get(&handler_task.module_name)
+                .ok_or_else(|| PlaybookError::ModuleNotFound(handler_task.module_name.clone()))?;
+            for host in &play_hosts {
+                if !host_set.contains(&host.name) {
+                    continue;
+                }
+                let rendered = templater
+                    .render_value(&handler_task.args, &host.vars)
+                    .unwrap_or_else(|_| handler_task.args.clone());
+                let plan = module.plan(&rendered, host).map_err(|e| PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: e.to_string(),
+                })?;
+                let outcome = module.apply(&plan, host).map_err(|e| PlaybookError::ExecFailed {
+                    host: host.name.clone(),
+                    message: e.to_string(),
+                })?;
+                match outcome.status {
+                    OutcomeStatus::Ok => play_stats.ok += 1,
+                    OutcomeStatus::Changed => play_stats.changed += 1,
+                    OutcomeStatus::Skipped => play_stats.skipped += 1,
+                    OutcomeStatus::Failed | OutcomeStatus::Unreachable => play_stats.failed += 1,
+                }
+                emit(
+                    &mode,
+                    &Event::TaskOutcome {
+                        play_index: play_idx,
+                        task_index: usize::MAX,
                         outcome,
                     },
                 );
@@ -173,13 +387,84 @@ pub fn run(playbook_src: &str, inventory_spec: &str, playbook_label: &str) -> Re
         ok: total.ok,
         changed: total.changed,
         failed: total.failed,
+        skipped: total.skipped,
         elapsed_ms,
+    })
+}
+
+/// Tag filter logic:
+/// - tag `always` always runs (unless explicitly skipped)
+/// - tag `never` only runs if explicitly named in --tags
+/// - if --tags is empty, all non-`never` tasks run
+/// - if --tags is non-empty, only tasks with at least one matching tag run
+/// - --skip-tags subtracts unconditionally
+fn tag_filter_passes(
+    task_tags: &[&String],
+    cli_tags: &[String],
+    cli_skip_tags: &[String],
+) -> bool {
+    let has_tag = |name: &str| task_tags.iter().any(|t| t.as_str() == name);
+
+    if has_tag("always") && !cli_skip_tags.iter().any(|t| t == "always") {
+        return !cli_skip_tags
+            .iter()
+            .any(|t| task_tags.iter().any(|tt| tt.as_str() == t.as_str()));
+    }
+
+    if cli_tags.is_empty() {
+        if has_tag("never") {
+            return false;
+        }
+    } else {
+        let any_match = cli_tags
+            .iter()
+            .any(|wanted| task_tags.iter().any(|tt| tt.as_str() == wanted.as_str()));
+        if !any_match {
+            return false;
+        }
+    }
+
+    if cli_skip_tags
+        .iter()
+        .any(|skip| task_tags.iter().any(|tt| tt.as_str() == skip.as_str()))
+    {
+        return false;
+    }
+
+    true
+}
+
+fn json_to_toml_value(v: serde_json::Value) -> std::result::Result<toml::Value, ()> {
+    Ok(match v {
+        serde_json::Value::Null => toml::Value::String(String::new()),
+        serde_json::Value::Bool(b) => toml::Value::Boolean(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                toml::Value::Integer(i)
+            } else if let Some(f) = n.as_f64() {
+                toml::Value::Float(f)
+            } else {
+                return Err(());
+            }
+        }
+        serde_json::Value::String(s) => toml::Value::String(s),
+        serde_json::Value::Array(a) => toml::Value::Array(
+            a.into_iter().filter_map(|x| json_to_toml_value(x).ok()).collect(),
+        ),
+        serde_json::Value::Object(o) => {
+            let mut t = toml::map::Map::new();
+            for (k, v) in o {
+                if let Ok(tv) = json_to_toml_value(v) {
+                    t.insert(k, tv);
+                }
+            }
+            toml::Value::Table(t)
+        }
     })
 }
 
 /// Parse an inventory spec into a flat host list.
 fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
-    // Inline host list: contains a comma or ends with a comma.
     if spec.contains(',') {
         let hosts: Vec<Host> = spec
             .split(',')
@@ -196,7 +481,6 @@ fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
         return Ok(hosts);
     }
 
-    // Try as a file.
     if std::path::Path::new(spec).exists() {
         let src = std::fs::read_to_string(spec)
             .map_err(|e| PlaybookError::Inventory(e.to_string()))?;
@@ -213,14 +497,12 @@ fn resolve_inventory(spec: &str) -> Result<Vec<Host>> {
         return Ok(hosts);
     }
 
-    // Bare hostname.
     Ok(vec![Host {
         name: spec.to_string(),
         vars: Vars::new(),
     }])
 }
 
-/// Minimal pattern match for M0: exact name, group name, `all`/`*`, or glob.
 fn pattern_matches(pattern: &str, host_name: &str) -> bool {
     if pattern == "all" || pattern == "*" {
         return true;
@@ -228,7 +510,6 @@ fn pattern_matches(pattern: &str, host_name: &str) -> bool {
     if pattern == host_name {
         return true;
     }
-    // Colon-joined union: any segment matches.
     if pattern.contains(':') {
         return pattern
             .split(':')
@@ -250,12 +531,54 @@ pub struct RunResult {
     pub ok: usize,
     pub changed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub elapsed_ms: u64,
 }
 
 impl RunResult {
-    /// Standard Ansible-style exit code: 0 = ok, 2 = host failures.
     pub fn exit_code(&self) -> i32 {
         if self.failed > 0 { 2 } else { 0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_filter_no_filters() {
+        let tags: Vec<&String> = vec![];
+        assert!(tag_filter_passes(&tags, &[], &[]));
+    }
+
+    #[test]
+    fn tag_filter_only_matching() {
+        let web = "web".to_string();
+        let tags = vec![&web];
+        assert!(tag_filter_passes(&tags, &["web".into()], &[]));
+        assert!(!tag_filter_passes(&tags, &["db".into()], &[]));
+    }
+
+    #[test]
+    fn tag_filter_skip_subtracts() {
+        let web = "web".to_string();
+        let tags = vec![&web];
+        assert!(!tag_filter_passes(&tags, &[], &["web".into()]));
+    }
+
+    #[test]
+    fn tag_filter_never_skipped_by_default() {
+        let never = "never".to_string();
+        let tags = vec![&never];
+        assert!(!tag_filter_passes(&tags, &[], &[]));
+        assert!(tag_filter_passes(&tags, &["never".into()], &[]));
+    }
+
+    #[test]
+    fn tag_filter_always_runs_unless_skipped() {
+        let always = "always".to_string();
+        let tags = vec![&always];
+        assert!(tag_filter_passes(&tags, &["other".into()], &[]));
+        assert!(!tag_filter_passes(&tags, &[], &["always".into()]));
     }
 }

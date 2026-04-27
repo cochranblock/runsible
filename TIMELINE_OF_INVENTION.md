@@ -10,6 +10,14 @@
 
 ## Entries
 
+### 2026-04-26 — Phase 5 partial: runsible-playbook M1 (templating, when, register, tags, handlers, set_fact, assert)
+
+**What:** Extended the runsible-playbook engine from M0 single-task happy-path to a full M1 execution model. Added MiniJinja templating (`Templater::{render_str, render_value, eval_bool}` with strict undefined handling). Engine now: merges per-host vars (host vars + play vars + extra_vars + magic `inventory_hostname`), filters tasks by `--tags`/`--skip-tags` (with `always`/`never` semantics), evaluates `when = { expr = "..." }` as a Jinja boolean (skipped tasks emit Skipped outcome), templates task args before module dispatch, captures `register = "name"` outcomes into per-host vars, validates `notify = ["handler_id"]` at parse-time (unknown ID = TypeCheck error), and flushes handlers at end-of-play only when at least one host saw `Changed`. Added `set_fact` and `assert` builtin modules with engine-side fact merging and Jinja expression evaluation. Workspace: 123/123 tests green.
+**Why:** The M0 engine could only run one informational module against one host. Real playbooks need variable interpolation, conditional execution, captured results, tag-based selective runs, and handler dispatch — these are the minimum viable feature set for converting an actual Ansible playbook (the geerlingguy.docker acceptance gate at M1 close).
+**Commit:** pending
+**AI Role:** AI implemented templating module + set_fact/assert via parallel agents, then sequentially refactored the engine to wire all M1 features through the existing event stream + outcome model. Human directed which features to prioritize within M1.
+**Proof:** `~/.cargo/bin/cargo test --workspace` — 123 tests pass; `./target/debug/runsible-playbook crates/runsible-playbook/examples/m1.toml -i localhost,` exercises templating + set_fact + assert + when-skip + tags + always-tag in one run; `--tags web` correctly filters to web-only + always tasks.
+
 ### 2026-04-26 — Phase 4 M0: runsible-pull, runsible-test, runsible-console
 
 **What:** Implemented M0 milestones for all three Phase 4 operator-tool crates in parallel. `runsible-pull`: git fetch from HTTPS/file:// URL via system `git`, spawn `runsible-playbook` against fetched bundle, atomic `heartbeat.json` write (`<path>.tmp` + rename), `runsible.pull.heartbeat.v1` schema, `--once`/`status`/`init` CLI. `runsible-test`: 7 sanity rules (S001–S007) over a runsible package directory, `units` runs `cargo test` over package's `crates/`, `env --show` discovery (Rust+cargo+sibling binaries), text+json output, dogfoods against the workspace itself. `runsible-console`: rustyline REPL, `<module> [k=v ...]` grammar reusing the synthetic-playbook engine pattern, colored summary line via `colored` crate, `quit`/`exit`/Ctrl-D exit cleanly. Workspace: 98/98 tests green.

@@ -39,6 +39,18 @@ pub struct RawPlay {
     /// `[[plays.post_tasks]]`
     #[serde(default)]
     pub post_tasks: Vec<toml::Value>,
+
+    /// `[plays.handlers.<id>]` — each value is a raw TOML table containing a single module call.
+    #[serde(default)]
+    pub handlers: IndexMap<String, toml::Value>,
+
+    /// `[plays.vars]`
+    #[serde(default)]
+    pub vars: IndexMap<String, toml::Value>,
+
+    /// `tags = [...]` applied to every task in the play.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,6 +84,10 @@ pub struct Task {
     pub args: toml::Value,
     pub register: Option<String>,
     pub tags: Vec<String>,
+    /// Optional `when = { expr = "..." }` Jinja boolean expression.
+    pub when: Option<String>,
+    /// Optional `notify = ["handler_id", ...]`.
+    pub notify: Vec<String>,
 }
 
 // Task-level keys that are not a module call.
@@ -105,8 +121,6 @@ pub(crate) const TASK_META_KEYS: &[&str] = &[
     "throttle",
     "run_once",
     "action",
-    "set_fact",
-    "set_fact!",
     "control",
     "id",
     "module_defaults",

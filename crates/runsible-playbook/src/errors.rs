@@ -14,6 +14,8 @@ pub enum PlaybookError {
     Inventory(String),
     #[error("execution failed on {host}: {message}")]
     ExecFailed { host: String, message: String },
+    #[error("template error: {0}")]
+    TemplateError(String),
 }
 
 pub type Result<T> = std::result::Result<T, PlaybookError>;

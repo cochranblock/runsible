@@ -1,0 +1,46 @@
+schema = "runsible.playbook.v1"
+
+[imports]
+debug = "runsible_builtin.debug"
+set_fact = "runsible_builtin.set_fact"
+assert = "runsible_builtin.assert"
+
+[[plays]]
+name = "M1 features demo"
+hosts = "localhost"
+
+[plays.vars]
+app_name = "runsible"
+app_version = "0.0.1"
+deploy_enabled = true
+
+[[plays.tasks]]
+name = "Print greeting"
+debug = { msg = "Deploying {{ app_name }} v{{ app_version }} to {{ inventory_hostname }}" }
+
+[[plays.tasks]]
+name = "Compute build id"
+set_fact = { build_id = "build-{{ app_version }}-001" }
+
+[[plays.tasks]]
+name = "Use the computed fact"
+debug = { msg = "Build ID is {{ build_id }}" }
+
+[[plays.tasks]]
+name = "Validate version format"
+assert = { that = ["app_version is defined"] }
+
+[[plays.tasks]]
+name = "Skipped when deploy disabled"
+when = { expr = "not deploy_enabled" }
+debug = { msg = "should be skipped" }
+
+[[plays.tasks]]
+name = "Web-only task"
+tags = ["web"]
+debug = { msg = "web tag" }
+
+[[plays.tasks]]
+name = "Always-runs task"
+tags = ["always"]
+debug = { msg = "always" }

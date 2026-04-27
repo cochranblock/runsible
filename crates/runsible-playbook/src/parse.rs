@@ -38,6 +38,23 @@ pub fn resolve_task(raw: &toml::Value, imports: &IndexMap<String, String>) -> Re
         })
         .unwrap_or_default();
 
+    // when = { expr = "..." } | when = "..." (string shorthand)
+    let when = match table.get("when") {
+        Some(toml::Value::Table(t)) => t.get("expr").and_then(|v| v.as_str()).map(String::from),
+        Some(toml::Value::String(s)) => Some(s.clone()),
+        _ => None,
+    };
+
+    let notify: Vec<String> = table
+        .get("notify")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let module_keys: Vec<&str> = table
         .keys()
         .filter(|k| !TASK_META_KEYS.contains(&k.as_str()))
@@ -65,5 +82,21 @@ pub fn resolve_task(raw: &toml::Value, imports: &IndexMap<String, String>) -> Re
         args,
         register,
         tags,
+        when,
+        notify,
     })
+}
+
+/// Resolve a handler entry: an `[plays.handlers.<id>]` table.
+/// Same shape as a task but with no `notify`/`register` etc.
+pub fn resolve_handler(
+    id: &str,
+    raw: &toml::Value,
+    imports: &IndexMap<String, String>,
+) -> Result<Task> {
+    let mut t = resolve_task(raw, imports)?;
+    if t.name.is_none() {
+        t.name = Some(id.to_string());
+    }
+    Ok(t)
 }

@@ -25,6 +25,8 @@ impl ModuleCatalog {
         };
         c.register(Box::new(crate::modules::debug::DebugModule));
         c.register(Box::new(crate::modules::ping::PingModule));
+        c.register(Box::new(crate::modules::set_fact::SetFactModule));
+        c.register(Box::new(crate::modules::assert_mod::AssertModule));
         c
     }
 
