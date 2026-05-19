@@ -22,6 +22,7 @@ version = "0.0.2"
 edition = "2021"
 license = "Unlicense"
 repository = "https://github.com/cochranblock/runsible"
+documentation = "https://cochranblock.github.io/runsible/"
 authors = ["Cochran Block"]
 
 [workspace.dependencies]

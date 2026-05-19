@@ -1,0 +1,15 @@
+# Summary
+
+- [Introduction](introduction.md)
+- [User Story Analysis](user-story-analysis.md)
+- [CLI Surface](cli-surface.md)
+- [Playbook Language](playbook-language.md)
+- [Inventory](inventory.md)
+- [Vault](vault.md)
+- [Collections & Galaxy](collections-galaxy.md)
+- [Configuration Reference](configuration-reference.md)
+- [Onboarding & Best Practices](onboarding.md)
+- [Built-in Modules](builtin-modules.md)
+- [Connection, Templating & Facts](connection-templating-facts.md)
+- [Test & Lint](test-and-lint.md)
+- [Poor Decisions](poor-decisions.md)

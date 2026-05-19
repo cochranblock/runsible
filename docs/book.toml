@@ -1,0 +1,20 @@
+[book]
+title = "runsible"
+description = "Rust reimplementation of Ansible's CLI surface. TOML playbooks, zero Python dependency."
+authors = ["Michael Cochran"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/cochranblock/runsible"
+edit-url-template = "https://github.com/cochranblock/runsible/edit/main/docs/src/{path}"
+site-url = "/runsible/"
+additional-css = ["theme/custom.css"]
+additional-js = ["theme/force-theme.js"]
+default-theme = "coal"
+preferred-dark-theme = "coal"
+no-section-label = true
+
+[output.html.fold]
+enable = true
+level = 1
